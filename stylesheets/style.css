@@ -1,0 +1,159 @@
+body {
+  padding: 50px;
+  font: 14px "Lucida Grande", Helvetica, Arial, sans-serif;
+}
+
+#fpsContainer {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 3;
+    color: gray;
+    background-color: rgba(255,255,255,0.9);
+    border-radius: 10px;
+    padding: 10px;
+    z-index: 2;
+}
+
+#toolsContainer {
+    position: absolute;
+    top: 400px;
+    left: 10px;
+    z-index: 3;
+    color: gray;
+    background-color: rgba(255,255,255,0.9);
+    border-radius: 10px;
+    padding: 10px;
+    z-index: 2;
+}
+
+.linkContainer {
+  padding-top: 20px;
+}
+
+.menuTitle {
+  padding-bottom: 5px;
+  font: 20px "Lucida Grande", Helvetica, Arial, sans-serif;
+  color: black;
+}
+
+#speedLabel {
+  font: 16px "Lucida Grande", Helvetica, Arial, sans-serif;
+  color: black;
+}
+
+#toolSizeLabel {
+  font: 16px "Lucida Grande", Helvetica, Arial, sans-serif;
+  color: black;
+}
+
+#resolutionLabel {
+  font: 16px "Lucida Grande", Helvetica, Arial, sans-serif;
+  color: black;
+}
+
+.tabrow {
+  background:linear-gradient( to top,rgb(208,208,208) 0%,rgba(208,208,208,0) 80% );
+  border-bottom:1px solid rgba(255,255,255,0.7);
+  display:flex;
+}
+
+.tabrow-tab {
+  user-select:none;
+  cursor:pointer;
+  flex:1 1 0px;
+  height:100%;
+  text-align:center;
+  opacity:0.6;
+  border-top-left-radius:4px;
+  border-top-right-radius:4px;
+
+  background-repeat:no-repeat;
+  background-position:center;
+}
+.tabrow-tab-hover {
+  background-color:#fff;
+}
+
+.tabrow-tab:active:not(.tabrow-tab-opened-accented):not(.tabrow-tab-opened) {
+  background-color:#ddd;
+  box-shadow:inset 2px 2px 10px rgba(0,0,0,0.2),0 2px 2px #ddd;
+}
+
+.tabrow-tab-opened,.tabrow-tab-opened-accented {
+  background-color:#fff;
+  opacity:1;
+  cursor:default;
+}
+
+.clickable {cursor: pointer;}
+
+.toggleButtonLabel {
+  top: 10px;
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 17px;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 17px;
+}
+
+/* Hide default HTML checkbox */
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* The slider */
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 13px;
+  width: 13px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+input:checked + .slider {
+  background-color: #2196F3;
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 1px #2196F3;
+}
+
+input:checked + .slider:before {
+  -webkit-transform: translateX(13px);
+  -ms-transform: translateX(13px);
+  transform: translateX(13px);
+}
+
+/* Rounded sliders */
+.slider.round {
+  border-radius: 17px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
