@@ -1,12 +1,12 @@
 
 <html>
   <head>
-    <title>Fractal sounds</title>
+    <title>Gasomaton</title>
     <link rel="stylesheet" href="./stylesheets/style.css"/>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"
               integrity="sha512-zhHQR0/H5SEBL3Wn6yYSaTTZej12z0hVZKOv3TwCUXT1z5qeqGcXJLLrbERYRScEDDpYIJhPC1fk31gqR783iQ=="
               crossorigin="anonymous"></script>
-    <meta property="og:image" content="https://www.golova.dev/experiments/images/preview.gif">
+    <meta property="og:image" content="https://www.golova.dev/experiments/images/preview.png">
     <meta property="og:title" content="Lattice gas state automata">
     <meta property="og:type" content="website">
     <link rel="apple-touch-icon" sizes="180x180" href="images/favicon-180.png">
@@ -16,11 +16,12 @@
     <meta name="twitter:title" content="golova.dev">
     <meta name="twitter:description" content="Interactive lattice gas web toy.">
     <meta name="twitter:site" content="@nsgolova">
-    <meta name="twitter:image" content="https://www.golova.dev/experiments/images/preview.gif">
-    <meta name="twitter:image:alt" content="Lattice gas">
+    <meta name="twitter:image" content="https://www.golova.dev/experiments/images/preview.png">
+    <meta name="twitter:image:alt" content="Gasomaton">
     <meta name="twitter:card" content="summary">
   </head>
   <body>
+    <div><label id="logoLabel">Gasomaton</label></div>
     <div id="fpsContainer" onclick="">
       <div id="topUI">
       <div class="menuTitle">Gas type</div>
@@ -28,21 +29,10 @@
       <div class="clickable" id="setSetting1">FHP II</div>
       <div class="clickable" id="setSetting2" style="color: red;">FHP III</div>
       <div class="clickable" id="setSetting3">FHP 6</div>
-      <div><label id="speedLabel">Speed: 16step</label></div>
-      <div><input type="range" id="speed" min="1" max="1000" value="16"></div>
+      <div><label id="speedLabel">Speed: 25step</label></div>
+      <div><input type="range" id="speed" min="1" max="200" value="25"></div>
       <div><label id="resolutionLabel">Details: 1x</label></div>
       <div><input type="range" id="resolution" min="1" max="50" value="1"></div>
-      <div>
-        <p style='font: 12px "Lucida Grande", Helvetica, Arial, sans-serif;'>
-          Controls:
-        <br>Left click - <b>tool</b>.
-        <br>Right click - <b>erase</b>.
-        <br>"Space" - <b>play/pause</b>.
-        <br>Wheel click or
-        <br>"alt"+mouse - <b>drag</b>.
-        <br>Scroll or pinch to <b>zoom</b>.
-      </p>
-      </div>
       <div class="linkContainer">
         <a href="https://youtu.be/" style="disabled: true;">
           <img src="./images/youtube.png" width="32" height="32" title="Video explanation (WIP)">
@@ -53,12 +43,28 @@
       </div>
       </div>
     </div>
+    <div id="setupContainer" onclick="">
+      <div id="topUI">
+      <div class="menuTitle">Preset</div>
+      <div class="clickable" id="setPreset0" style="visibility: hidden; height: 0px;">SMTH</div>
+      <div class="clickable" id="setPreset1">Random</div>
+      <div class="clickable" id="setPreset2" style="color: red;">Wind tube</div>
+      <div class="clickable" id="setPreset3" style="visibility: hidden; height: 0px;">SMTH</div>
+      <div class="clickable" id="setPreset4">Empty</div>
+      </div>
+    </div>
     <div id="toolsContainer" onclick="">
       <div id="topUI">
-      <div class="menuTitle">Drawing</div>
+      <div class="menuTitle">Tool</div>
       <div class="tabrow" style="height: 35px;">
-        <div class="tabrow-tab tabrow-tab-opened-accented" id="selectTool0" title="Fan" style="line-height: 35px; display: block; background-image: url('./images/fan.png'); background-size: 28px;"></div>
-        <div class="tabrow-tab" id="selectTool1" title="Wall" style="line-height: 35px; display: block; background-image: url('./images/wall.png'); background-size: 28px;"></div>
+        <div class="tabrow-tab tabrow-tab-opened-accented" id="selectTool0" title="Particle generator" style="line-height: 35px; display: block; background-image: url('./images/fan.png'); background-size: 28px;"></div>
+        <div class="tabrow-tab" id="selectTool1" title="Inpenetratable wall" style="line-height: 35px; display: block; background-image: url('./images/wall.png'); background-size: 28px;"></div>
+        <div class="tabrow-tab" id="selectTool2" title="Clear (or right-click)" style="line-height: 35px; display: block; background-image: url('./images/erase.png'); background-size: 28px;"></div>
+      </div>
+      <div class="menuTitle">Shape</div>
+      <div class="tabrow" style="height: 35px;">
+        <div class="tabrow-tab tabrow-tab-opened-accented" id="selectShape0" title="Circle" style="line-height: 35px; display: block; background-image: url('./images/circle.png'); background-size: 28px;"></div>
+        <div class="tabrow-tab" id="selectShape1" title="Square" style="line-height: 35px; display: block; background-image: url('./images/square.png'); background-size: 28px;"></div>
       </div>
       <div style="padding: 10px; display: block;">
       <div><label id="toolSizeLabel">Brush size: 2</label></div>
@@ -70,6 +76,9 @@
       <canvas id="placeholder" width="1200" height="720" style="position: absolute; left: 0; top: 0; z-index: 0; width: 100%; height: 100%;"></canvas>
       <canvas id="glcanvas" width="1200" height="720" style="position: absolute; left: 0; top: 0; z-index: 0;"></canvas>
     </div>
+    <div><label id="fpsLabel" style="position: absolute; left: 10; bottom: 10; z-index: 0;color: red;">fps: 0</label></div>
+    <script src="./javascripts/Timer.js"></script>
+    <script src="./javascripts/shaders.js"></script>
     <script src="./javascripts/main.js"></script>
   </body>
 </html>

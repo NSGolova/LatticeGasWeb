@@ -1,8 +1,8 @@
-# LatticeGasWeb
+# Gasomaton
 
 WebGL interactive implementation of lattice gas.
 All calculations are performed on GPU so it can handle huge
-amount of partcles.
+amount of particles.
 
 Deployed [here](https://www.golova.dev/automata/latticeGas)
 

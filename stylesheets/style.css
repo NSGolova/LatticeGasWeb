@@ -5,7 +5,19 @@ body {
 
 #fpsContainer {
     position: absolute;
-    top: 10px;
+    top: 450px;
+    left: 10px;
+    z-index: 3;
+    color: gray;
+    background-color: rgba(255,255,255,0.9);
+    border-radius: 10px;
+    padding: 10px;
+    z-index: 2;
+}
+
+#setupContainer {
+    position: absolute;
+    top: 345px;
     left: 10px;
     z-index: 3;
     color: gray;
@@ -17,7 +29,7 @@ body {
 
 #toolsContainer {
     position: absolute;
-    top: 400px;
+    top: 50px;
     left: 10px;
     z-index: 3;
     color: gray;
@@ -36,6 +48,16 @@ body {
   font: 20px "Lucida Grande", Helvetica, Arial, sans-serif;
   color: black;
 }
+
+#logoLabel {
+  font: 30px "Lucida Grande", Helvetica, Arial, sans-serif;
+  color: white;
+  position: absolute;
+  left: 10;
+  top: 10;
+  z-index: 2;
+}
+
 
 #speedLabel {
   font: 16px "Lucida Grande", Helvetica, Arial, sans-serif;

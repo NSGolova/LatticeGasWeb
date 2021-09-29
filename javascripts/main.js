@@ -1,15 +1,25 @@
+
+// Canvas size
+var resolution;
+// Copy texture size
+var viewsize;
+// State texture size
+var statesize;
+// Copy texture resolution multiplicator.
+var sizeMultiply = 10.0;
+
 var zoom = 0.1;
 var camera = [0., 0.];
-
-var sizeMultiply = 10.0;
-var resolution, viewsize, statesize;
+var fps;
 
 const OperationType = {
   collision: 0,
   initializeRandom: 1,
   initializeWind: 2,
-  resize: 3
+  resize: 3,
+  clear: 4
 };
+var preset = OperationType.initializeWind;
 
 const GasType = {
   FHPI: 0,
@@ -22,29 +32,67 @@ var type = GasType.FHPIII;
 const ToolType = {
   fan: 0,
   wall: 1,
+  nothing: 2,
   clear: 128
 };
+
+// Tool for the left mouse button.
 var tool = ToolType.fan;
+// Tool for the right mouse button.
+var secondaryTool = ToolType.clear;
 var toolRadius = 10;
 var toolPosition;
 
-var iterations = -1;
-var speed = 5; // ms
+const ToolMode = {
+  main: 0,
+  secondary: 1,
+  none: 128
+};
+var toolInUse = ToolMode.none;
 
-var paused = true;
-var curDrag;
-var prevDrag;
+const ToolShape = {
+  circle: 0,
+  square: 1,
+  none: 128
+};
+var shape = ToolShape.circle;
+
+// How fast simulation is calculated.
+var speed = 25;
+var timers = [];
 
 const E=1, SE=2, SW=4, W=8, NW=16, NE=32, REST=64, BOUNDARY=128;
 const directionCircle = [NW, SW, W, SE, NE, E];
 var collisionRules;
 
-var gl, buffers, programs, framebuffers, textures;
+var gl, gl2Available = false;
+var buffers, programs, framebuffers, textures;
+var curDrag, prevDrag;
+var cameraDest = [0., 0.];
 
 main();
 
 function main() {
-  gl = document.querySelector('#glcanvas').getContext('webgl2');
+  setupWebGL();
+  setupShaderStructs();
+
+  setupDefault();
+  start();
+
+  setupButtons();
+  setupEventHandlers();
+  setupFps();
+}
+
+function setupWebGL() {
+  const canvas = document.querySelector('#glcanvas');
+  gl = canvas.getContext('webgl2');
+
+  if (gl) {
+    gl2Available = true;
+  } else {
+    gl = canvas.getContext('webgl');
+  }
 
   if (!gl) {
     const text = `
@@ -55,279 +103,12 @@ function main() {
     alert(text);
     return;
   }
+}
 
-  const quad = `#version 300 es
-    #ifdef GL_ES
-    precision highp float;
-    #endif
-
-    in vec4 quad;
-
-    void main() {
-        gl_Position = quad;
-    }
-  `;
-  const copy = `#version 300 es
-    #ifdef GL_ES
-    precision highp float;
-    #endif
-
-    uniform highp isampler2D state;
-
-    uniform vec2 scale;
-    uniform vec2 size;
-
-    uniform vec2 camera;
-    uniform vec2 resolution;
-    uniform float zoom;
-
-    out vec4 fragColor;
-
-    const int Nothing = 0, E=1, SE=2, SW=4, W=8, NW=16, NE=32, REST=64, BOUNDARY=-128;
-
-    vec3 hsv2rgb(vec3 c)
-    {
-        vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-    }
-
-    vec4 vectorAngleColor(vec2 v)
-    {
-        float angle = 0.5 + atan(v.y, v.x);
-        return vec4(hsv2rgb(vec3(angle, 1.0, 1.0)), 1.0);
-    }
-
-    // square root of 3 over 2
-    const float hex_factor = 0.8660254037844386;
-
-    vec2 ci[6] = vec2[6](
-      vec2(1., 0.),
-      vec2(0.5, hex_factor),
-      vec2(-0.5, hex_factor),
-      vec2(-1., 0.),
-      vec2(-0.5, -hex_factor),
-      vec2(0.5, -hex_factor));
-
-    #define HEX_FROM_CART(p) vec2(p.x / hex_factor, p.y)
-    #define CART_FROM_HEX(g) vec2(g.x * hex_factor, g.y)
-
-    //////////////////////////////////////////////////////////////////////
-    // Given a 2D position, find integer coordinates of center of nearest
-    // hexagon in plane.
-
-    vec2 nearestHexCell(in vec2 pos) {
-
-        // integer coords in hex center grid -- will need to be adjusted
-        vec2 gpos = HEX_FROM_CART(pos);
-        vec2 hex_int = floor(gpos);
-
-        // adjust integer coords
-        float sy = step(2.0, mod(hex_int.x+1.0, 4.0));
-        hex_int += mod(vec2(hex_int.x, hex_int.y + sy), 2.0);
-
-        // difference vector
-        vec2 gdiff = gpos - hex_int;
-
-        // figure out which side of line we are on and modify
-        // hex center if necessary
-        if (dot(abs(gdiff), vec2(hex_factor*hex_factor, 0.5)) > 1.0) {
-            vec2 delta = sign(gdiff) * vec2(2.0, 1.0);
-            hex_int += delta;
-        }
-
-        return vec2(hex_int.y, hex_int.x);
-    }
-
-    //   |2|1|
-    // |3|*|0|
-    //   |4|5|
-    ivec2 oddNbors[6] = ivec2[6](ivec2(1, 0), ivec2(1, 1), ivec2(0, 1), ivec2(-1, 0), ivec2(0, -1), ivec2(1, -1));
-    // |2|1|
-    // |3|*|0|
-    // |4|5|
-    ivec2 evenNbors[6] = ivec2[6](ivec2(1, 0), ivec2(0, 1), ivec2(-1, 1), ivec2(-1, 0), ivec2(-1, -1), ivec2(0, -1));
-
-    vec4 colorAt(ivec2 pos) {
-      vec4 angleColor;
-      ivec4 data = texelFetch(state, pos, 0);
-      if (data.y == 1) {
-        angleColor = vec4(1.0, 1.0, 1.0, 1.0);
-      } else {
-        int prtcl = data.x;
-
-        switch (prtcl) {
-          case Nothing:
-            angleColor = vec4(0.0, 0.0, 0.0, 1.0);
-            break;
-          case BOUNDARY:
-            angleColor = vec4(0.9, 0.9, 0.9, 1.0);
-            break;
-          case REST:
-            angleColor = vec4(0.6, 0.6, 0.6, 1.0);
-            break;
-          default:
-            vec2 velocity = vec2(0.0, 0.0);
-            for (int i = 0; i < 6; i++) {
-              if ((prtcl & (1 << i)) != 0) {
-                velocity += ci[i];
-              }
-            }
-            angleColor = vectorAngleColor(velocity);
-        }
-      }
-
-      return angleColor;
-    }
-
-    void main() {
-        vec2 npos = (((gl_FragCoord.xy - resolution * 0.5) / scale) / zoom - camera / scale * vec2(1.0, -1.0)) * size * 2.0;
-        npos += size * 0.5;
-        ivec2 pos;
-        if (zoom < 0.3) {
-          pos = ivec2(npos / 2.0).yx;
-        } else {
-          pos = ivec2(nearestHexCell(npos) / 2.0);
-        }
-
-        vec4 angleColor;
-        angleColor += colorAt(pos);
-
-        // TODO: add hex grid for the close zoom
-        // angleColor -= smoothstep(.49, .5, iso);
-        fragColor = angleColor;
-    }
-  `;
-
-  const col = `#version 300 es
-    #ifdef GL_ES
-    precision highp float;
-    #endif
-
-    uniform highp isampler2D state;
-    uniform vec2 scale;
-    uniform int colissionMap[129];
-    uniform vec3 tool;
-    uniform int operation;
-    out ivec4 fragColor;
-
-    const int Nothing = 0, E=1, SE=2, SW=4, W=8, NW=16, NE=32, REST=64, BOUNDARY=-128;
-    const int collision = 0, initializeRandom = 1, initializeWind = 2, resize = 3;
-
-    int xorshift(in int value) {
-      // Xorshift*32
-      // Based on George Marsaglia's work: http://www.jstatsoft.org/v08/i14/paper
-      value ^= value << 13;
-      value ^= value >> 17;
-      value ^= value << 5;
-      return value;
-    }
-
-    int decodeColor (ivec4 v) {
-        return v.x << 24 | v.y << 16 | v.z << 8 | v.w;
-    }
-
-    ivec4 encodeColor(int c) {
-      return ivec4((c >> 24) & 0xff,
-            (c >> 16) & 0xff,
-            (c >> 8) & 0xff,
-            c & 0xff);
-    }
-
-    int periodicCoordinatePart(int k, int maxk) {
-        if (k < 0) {
-            return k + maxk;
-        } else if (k == (maxk - 1)) {
-            return 0;
-        } else {
-            return k;
-        }
-    }
-
-    ivec2 periodicCoordinate(ivec2 k, ivec2 maxK) {
-      return ivec2(periodicCoordinatePart(k.x, maxK.x), periodicCoordinatePart(k.y, maxK.y));
-    }
-
-    //   |2|1|
-    // |3|*|0|
-    //   |4|5|
-    ivec2 oddNbors[6] = ivec2[6](ivec2(1, 0), ivec2(1, 1), ivec2(0, 1), ivec2(-1, 0), ivec2(0, -1), ivec2(1, -1));
-    // |2|1|
-    // |3|*|0|
-    // |4|5|
-    ivec2 evenNbors[6] = ivec2[6](ivec2(1, 0), ivec2(0, 1), ivec2(-1, 1), ivec2(-1, 0), ivec2(-1, -1), ivec2(0, -1));
-
-    void calcCollision(inout ivec4 data, ivec2 position) {
-      int prtcl = data.x;
-      if (prtcl == BOUNDARY) { return; }
-      int result = prtcl & REST;
-      ivec2 nbors[6];
-      if (position.y % 2 == 0) { nbors = evenNbors; } else { nbors = oddNbors; }
-      for (int dir = 0, odir = 3; dir < 6; dir++, odir = (odir + 1) % 6) {
-        ivec2 nborPosition = periodicCoordinate(position + nbors[odir], ivec2(scale));
-        int nbor = texelFetch(state, nborPosition, 0).x;
-        if (nbor != BOUNDARY) {
-          // accept an inbound particle travelling in this direction, if there is one
-          result |= nbor & (1 << dir);
-        } else if ((prtcl & (1 << odir)) != 0) {
-          // or if the neighbor is a boundary then reverse one of our own particles
-          result |= 1 << dir;
-        }
-      }
-      data.x = colissionMap[result];
-    }
-
-    void generateRandom(inout ivec4 data, ivec2 position) {
-      int random = xorshift(position.x * position.y) % 128;
-      if ((random & BOUNDARY) != BOUNDARY) {
-        data.x = random;
-      }
-    }
-
-    void generateWind(inout ivec4 data, ivec2 position) {
-      vec2 pos = vec2(position);
-      if (pos.x < scale.x * 0.02 || pos.x > scale.x * 0.98 ||
-          (pos.y < scale.y * 0.32 && pos.y > scale.y * 0.3 && pos.x < scale.x * 0.7 && pos.x > scale.x * 0.3)) {
-          data.x = BOUNDARY;
-      } else if (pos.y > scale.y * 0.33) {
-          int random = xorshift(position.x * position.y) % 128;
-          if ((random & E) == E) {
-            data.x = random;
-          }
-      }
-    }
-
-    void main() {
-      vec2 pos = gl_FragCoord.xy;
-      ivec2 position = ivec2(gl_FragCoord.xy);
-      ivec4 data = texelFetch(state, position, 0);
-
-      switch (operation) {
-        case collision:
-          calcCollision(data, position);
-          break;
-        case initializeRandom:
-          generateRandom(data, position);
-          break;
-        case initializeWind:
-          generateWind(data, position);
-          break;
-      }
-
-      bool xx = (pos.x >= tool.y - tool.z) && (pos.x < tool.y + tool.z);
-      bool yy = (pos.y >= tool.x - tool.z) && (pos.y < tool.x + tool.z);
-      if (xx && yy) {
-        data.y = 1;
-      } else {
-        data.y = 0;
-      }
-      fragColor = data;
-    }
-  `;
-
+function setupShaderStructs() {
   programs = {
-    copy: initShaderProgram(gl, quad, copy),
-    col: initShaderProgram(gl, quad, col)
+    copy: initShaderProgram(gl, quadShader, copyShader),
+    col: initShaderProgram(gl, quadShader, collisionShader)
   };
 
   programVars = {
@@ -346,6 +127,8 @@ function main() {
       scale: gl.getUniformLocation(programs.col, 'scale'),
       colissionMap: gl.getUniformLocation(programs.col, 'colissionMap'),
       tool: gl.getUniformLocation(programs.col, 'tool'),
+      shape: gl.getUniformLocation(programs.col, 'shape'),
+      toolInUse: gl.getUniformLocation(programs.col, 'toolInUse'),
       operation: gl.getUniformLocation(programs.col, 'operation')
     }
   }
@@ -357,12 +140,6 @@ function main() {
   framebuffers = {
       step: gl.createFramebuffer()
   };
-
-  setupDefault();
-  start();
-
-  setupButtons();
-  setupEventHandlers();
 }
 
 function setupDefault() {
@@ -372,7 +149,7 @@ function setupDefault() {
   zoom = 100 / statesize[0];
   camera = [-resolution[0] * 2.5, resolution[1] * (3 * resolution[0] / resolution[1])];
 
-  stepRandom();
+  updatePreset();
 }
 
 function resize() {
@@ -384,7 +161,7 @@ function resize() {
   step();
   textures.back = createTexture(gl.REPEAT, gl.NEAREST);
   step();
-  drawy();
+  redraw();
   start();
 }
 
@@ -499,7 +276,7 @@ function migrate(oldState) {
     }
   }
   set(result);
-  drawy();
+  redraw();
 }
 
 function initCollisionRules() {
@@ -648,16 +425,28 @@ function swap() {
     textures.back = tmp;
 }
 
+function updatePreset() {
+  stepProgram(programs.col, programVars.col, preset);
+}
+
 function stepResize() {
   stepProgram(programs.col, programVars.col, OperationType.resize);
 }
 
 function stepRandom() {
-    stepProgram(programs.col, programVars.col, OperationType.initializeWind);
+  stepProgram(programs.col, programVars.col, OperationType.initializeRandom);
+}
+
+function stepWind() {
+  stepProgram(programs.col, programVars.col, OperationType.initializeWind);
+}
+
+function stepClear() {
+  stepProgram(programs.col, programVars.col, OperationType.clear);
 }
 
 function step() {
-    stepProgram(programs.col, programVars.col, OperationType.collision);
+  stepProgram(programs.col, programVars.col, OperationType.collision);
 }
 
 function stepProgram(program, vars, operation) {
@@ -680,6 +469,18 @@ function stepProgram(program, vars, operation) {
   gl.uniform1iv(vars.colissionMap, colissionMap());
   if (toolPosition) {
     gl.uniform3f(vars.tool, toolPosition.x, toolPosition.y, toolRadius);
+    gl.uniform1i(vars.shape, shape);
+    switch (toolInUse) {
+      case ToolMode.none:
+        gl.uniform1i(vars.toolInUse, ToolType.nothing);
+        break;
+      case ToolMode.main:
+        gl.uniform1i(vars.toolInUse, tool);
+        break;
+      case ToolMode.secondary:
+        gl.uniform1i(vars.toolInUse, secondaryTool);
+        break;
+    }
   }
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -687,58 +488,59 @@ function stepProgram(program, vars, operation) {
   swap();
 }
 
-function drawy() {
+function redraw() {
   // createImageFromTexture(textures.front, statesize[0], statesize[1] * 8);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
   const program = programs.copy;
 
+  gl.activeTexture(gl.TEXTURE0 + 0);
+  gl.bindTexture(gl.TEXTURE_2D, textures.front);
 
+  gl.viewport(0, 0, viewsize[0], viewsize[1]);
 
-    gl.activeTexture(gl.TEXTURE0 + 0);
-    gl.bindTexture(gl.TEXTURE_2D, textures.front);
+  gl.useProgram(program);
 
-    gl.viewport(0, 0, viewsize[0], viewsize[1]);
+  gl.uniform1i(programVars.copy.state, 0);
+  gl.uniform2f(programVars.copy.camera, camera[0], camera[1]);
+  gl.uniform1f(programVars.copy.zoom, zoom);
 
-    gl.useProgram(program);
+  drawScene(programVars.copy.quad);
+  gl.uniform2f(programVars.copy.scale, viewsize[0], viewsize[1]);
+  gl.uniform2f(programVars.copy.size, statesize[0], statesize[1]);
+  gl.uniform2f(programVars.copy.resolution, resolution[0], resolution[1]);
 
-    gl.uniform1i(programVars.copy.state, 0);
-    gl.uniform2f(programVars.copy.camera, camera[0], camera[1]);
-    gl.uniform1f(programVars.copy.zoom, zoom);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    drawScene(programVars.copy.quad);
-    gl.uniform2f(programVars.copy.scale, viewsize[0], viewsize[1]);
-    gl.uniform2f(programVars.copy.size, statesize[0], statesize[1]);
-    gl.uniform2f(programVars.copy.resolution, resolution[0], resolution[1]);
-
-
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  document.getElementById("fpsLabel").innerHTML = "fps: " + fps;
 }
-
-var count = 0;
-var timer;
 
 function start() {
   paused = false;
-    if (timer == null) {
-        timer = setInterval(function(){
-          // if (count < 8) {
-          //   count++;
-            step();
-            drawy();
-          // }
+  timers.forEach((item, i) => {
+    item.stop();
+  });
+  timers = [];
 
-        }, speed);
-    }
+  const timersCount = speed > 20 ? speed - 20 : 1;
+  const throttle = speed > 20 ? 0 : 20 - speed;
+
+  for (var i = 0; i < timersCount; i++) {
+    timers.push(new Timer(animationFrame, throttle));
+  }
 }
 
 function pause() {
   paused = true;
-  if (timer != null) {
-    clearInterval(timer);
-    timer = null;
-  }
+  timers.forEach((item, i) => {
+    item.stop();
+  });
+}
+
+function animationFrame() {
+    step();
+    redraw();
 }
 
 //
@@ -862,11 +664,12 @@ function subset(texture, source, xoff, yoff, width, height) {
 };
 
 function applyTool(point, toolType) {
-  var result = new Int8Array(toolRadius * toolRadius * 4 * 4);
+  const resultLength = toolRadius * toolRadius * 4 * 4;
+  var result = new Int8Array(resultLength);
   switch (toolType) {
     case ToolType.wall:
     case ToolType.clear:
-      for (var x = 0; x < toolRadius * toolRadius * 4 * 4; x++) {
+      for (var x = 0; x < resultLength; x++) {
           result[x] = toolType == ToolType.wall ? 128 : 0;
       }
       break;
@@ -874,7 +677,7 @@ function applyTool(point, toolType) {
 
       const prob = 0.2;
       if (curDrag == null) {
-        for (var x = 0; x < toolRadius * toolRadius * 4 * 4; x++) {
+        for (var x = 0; x < resultLength; x++) {
           var aux_bit = 0; //Init
           //Get a random number with a p% of ones
           for (var b = 0; b < 8; b++)
@@ -887,7 +690,7 @@ function applyTool(point, toolType) {
         const strength = dragDistance() / Math.min(resolution[0], resolution[1]);
         const direction = Math.PI * 2 - (dragDirection() + Math.PI);
 
-        for (var x = 0; x < toolRadius * toolRadius * 4 * 4; x++) {
+        for (var x = 0; x < resultLength; x++) {
           for (var attempt = 0; attempt < 4; attempt++) {
             if (Math.random() > strength) {
               const i = (direction + (Math.random() - 0.5)) | 0;
@@ -911,45 +714,128 @@ function applyTool(point, toolType) {
   const height = toolRadius * 2 + (startY >= 0 ? 0 : startY) + (endY >= 0 ? 0 : endY);
 
   subset(textures.front, result, startX >= 0 ? startX : 0, startY >= 0 ? startY : 0, width, height);
-  drawy();
+  redraw();
 }
 
 function setupEventHandlers() {
 
-  var px, py;
   var leftPressed = false;
   var rightPressed = false;
   var dragging = false;
-  var juliaDrag = false;
-  var takeScreenshot = false;
-  var showHelpMenu = false;
-  // var gestureStartRotation;
+  // The two touches that make up a pinch-to-zoom gesture.
+  // Updated every time one of them changes.
+  var gestureTouches;
+  // How zoomed in the image was when the gesture began.
   var gestureStartZoom;
+  // The distance there was between the two touches when the gesture began.
+  var gestureStartDist;
+  // The points on the complex plane each touch started at.
+  // We use this to apply the necessary translations to make the touches
+  // stay as close as possible to their original positions on the image.
+  var gestureStartPoints;
+  // The position the camera was at when the gesture started.
+  var gestureStartCamera;
+  // Whether a gesture is currently running.
   var gesturing = false;
 
-  window.addEventListener("gesturestart", function (e) {
-    e.preventDefault();
+  function touchDistance(touchA, touchB) {
+    return Math.sqrt(
+      (touchA.pageX - touchB.pageX) ** 2 + (touchA.pageY - touchB.pageY) ** 2,
+    );
+  }
 
-    gesturing = true;
-    prevDrag = [e.pageX, e.pageY];
-    gestureStartZoom = zoom;
+  const canvas = document.querySelector("#glcanvas");
+
+  // Define these on the canvas so that we don't override events for the controls.
+  canvas.addEventListener("touchstart", function (e) {
+    if (e.targetTouches.length === 2 && !gesturing) {
+      e.preventDefault();
+
+      const touchA = e.targetTouches[0];
+      const touchB = e.targetTouches[1];
+
+      gesturing = true;
+      gestureStartZoom = zoom;
+      gestureStartDist = touchDistance(touchA, touchB);
+      gestureStartPoints = [
+        ScreenToPt(touchA.pageX, touchA.pageY),
+        ScreenToPt(touchB.pageX, touchB.pageY),
+      ];
+      gestureStartCamera = camera;
+      gestureTouches = [touchA, touchB];
+    }
   });
 
-  window.addEventListener("gesturechange", function (e) {
+  canvas.addEventListener("touchmove", function (e) {
+    if (!gesturing) {
+      return;
+    }
+
+    let changed = false;
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === gestureTouches[0].identifier) {
+        changed = true;
+        gestureTouches[0] = touch;
+      }
+
+      if (touch.identifier === gestureTouches[1].identifier) {
+        changed = true;
+        gestureTouches[1] = touch;
+      }
+    }
+
+    if (!changed) {
+      return;
+    }
+
     e.preventDefault();
 
-    // rotation = gestureStartRotation + e.rotation;
+    // First, handle zooming.
+    // Calculate the ratio of the distance between the new touch points
+    // to the distance between them when the gesture started.
+    const newDist = touchDistance(...gestureTouches);
+    const scale = newDist / gestureStartDist;
 
-    setZoom(programInfo, e.scale * gestureStartZoom);
+    // Multiply that by the zoom we had when the gesture started to get the new zoom.
+    zoom = scale * gestureStartZoom;
 
-    curDrag = [e.pageX, e.pageY];
-    applyDrag();
-  })
+    // Now handle translating.
+    // Figure out the points these touches map to on the fractal.
+    const ptA = ScreenToPt(gestureTouches[0].pageX, gestureTouches[0].pageY);
+    const ptB = ScreenToPt(gestureTouches[1].pageX, gestureTouches[1].pageY);
 
-  window.addEventListener("gestureend", function (e) {
-    e.preventDefault();
-    gesturing = false;
+    // Figure out how fare the points are from where they should be.
+    const xDistA = ptA[0] - gestureStartPoints[0][0];
+    const xDistB = ptB[0] - gestureStartPoints[1][0];
+    const yDistA = ptA[1] - gestureStartPoints[0][1];
+    const yDistB = ptB[1] - gestureStartPoints[1][1];
+
+    // Figure out how far they are from where they should be on average.
+    const xDist = (xDistA + xDistB) / 2;
+    const yDist = (yDistA + yDistB) / 2;
+
+    // Move the camera.
+    camera[0] = gestureStartCamera[0] + xDist;
+    camera[1] = gestureStartCamera[1] + yDist;
+
+    redraw();
   });
+
+  function onTouchEnd(e) {
+    for (const touch of e.changedTouches) {
+      if (
+        touch.identifier === gestureTouches[0].identifier ||
+        touch.identifier === gestureTouches[1].identifier
+      ) {
+        e.preventDefault();
+        gesturing = false;
+        break;
+      }
+    }
+  }
+
+  canvas.addEventListener("touchend", onTouchEnd);
+  canvas.addEventListener("touchcancel", onTouchEnd);
 
   document.addEventListener('keyup', event => {
     if (event.code === 'Space') {
@@ -959,36 +845,37 @@ function setupEventHandlers() {
         pause();
       }
     }
+    if (isFinite(event.key)) {
+      selectTool(null, parseInt(event.key) - 1);
+    }
   })
 
   window.addEventListener("wheel", e => {
     e.preventDefault();
 
-    const delta = -Math.sign(e.deltaY)
-    cameraFp = [e.offsetX, e.offsetY];
+    const zoomAmount = -Math.sign(e.deltaY);
 
-    applyZoom(delta);
-  }, { passive: false });
+    if (e.shiftKey) {
+      toolRadius += Math.round(zoomAmount * (toolRadius / 20.0));
+      document.getElementById("toolSizeLabel").innerHTML = "Brush size: " + toolRadius * 2;
+      toolSizeLabel.value = toolRadius * 2;
+    } else {
+      const cameraFp = ScreenToPt(e.pageX, e.pageY);
 
-  window.addEventListener("pointerdown", e => {
-    if (gesturing) {
-      return;
+      zoom += zoomAmount * (zoom / 20.0);
+      const cameraFpNew = ScreenToPt(e.pageX, e.pageY);
+      const fpXDelta = cameraFpNew[0] - cameraFp[0];
+      const fpYDelta = cameraFpNew[1] - cameraFp[1];
+
+      cameraDest[0] += fpXDelta;
+      cameraDest[1] += fpYDelta;
+
+      camera[0] = (camera[0] + fpXDelta) * 0.8 + cameraDest[0] * 0.2;
+      camera[1] = (camera[1] + fpYDelta) * 0.8 + cameraDest[1] * 0.2;
     }
-    prevDrag = [e.offsetX, e.offsetY];
-      dragging = (e.button == 1 || (e.altKey && e.button == 0));
-      if (e.button == 2) {
-        rightPressed = true;
-        paused = true;
-        var coord = ScreenToState(e.offsetX, e.offsetY);
-        applyTool(coord, ToolType.clear);
-      }
-      if (!dragging && e.button == 0) {
-        leftPressed = true;
 
-        var coord = ScreenToState(e.offsetX, e.offsetY);
-        applyTool(coord, tool);
-      }
-  });
+    redraw();
+  }, { passive: false });
 
   // Disable context menu for right click.
   if (document.addEventListener) {
@@ -1001,38 +888,53 @@ function setupEventHandlers() {
       });
   }
 
-  window.addEventListener('pointermove', e => {
+  canvas.addEventListener("pointerdown", e => {
+    if (gesturing) {
+      return;
+    }
+    prevDrag = [e.offsetX, e.offsetY];
+      dragging = (e.button == 1 || (e.altKey && e.button == 0));
+      if (e.button == 2) {
+        rightPressed = true;
+
+        toolInUse = ToolMode.secondary;
+      }
+      if (!dragging && e.button == 0) {
+        leftPressed = true;
+
+        toolInUse = ToolMode.main;
+      }
+  });
+
+  canvas.addEventListener('pointermove', e => {
     if (gesturing) {
       return;
     }
     toolPosition = ScreenToState(e.offsetX, e.offsetY);
+    redraw();
     curDrag = [e.offsetX, e.offsetY];
     if (dragging) {
       applyDrag();
     }
-    if (leftPressed || rightPressed) {
-      var coord = ScreenToState(e.offsetX, e.offsetY);
-      applyTool(coord, leftPressed ? tool : ToolType.clear);
-    }
   });
 
-  window.addEventListener('pointerup', e => {
+  canvas.addEventListener('pointerup', e => {
     dragging = false;
     leftPressed = false;
     rightPressed = false;
     curDrag = null;
     prevDrag = null;
+    toolInUse = ToolMode.none;
   });
 
   var speedLabel = document.querySelector('#speed');
   speedLabel.addEventListener('input', function() {
     document.getElementById("speedLabel").innerHTML = "Speed: " + this.value + "step";
-    speed = 1000.0 / this.value;
-    pause();
+    speed = this.value;
     start();
   });
-  speedLabel.value = 1000.0 / speed;
-  document.getElementById("speedLabel").innerHTML = "Speed: " + 1000.0 / speed + "step";
+  speedLabel.value = speed;
+  document.getElementById("speedLabel").innerHTML = "Speed: " + speed + "step";
 
   var toolSizeLabel = document.querySelector('#toolSize');
   toolSizeLabel.addEventListener('input', function() {
@@ -1066,7 +968,9 @@ function setupEventHandlers() {
 }
 
 var g_setSettingsElements;
+var g_setPresetElements;
 var g_selectToolElements;
+var g_selectShapeElements;
 function setSetting(elem, id) {
   for (var i = 0; i < g_setSettingsElements.length; ++i) {
     g_setSettingsElements[i].style.color = i == id ? "red" : "gray"
@@ -1074,11 +978,25 @@ function setSetting(elem, id) {
   type = id;
   initCollisionRules();
 }
+function setPreset(elem, id) {
+  for (var i = 0; i < g_setPresetElements.length; ++i) {
+    g_setPresetElements[i].style.color = i == id ? "red" : "gray"
+  }
+  preset = id;
+  updatePreset();
+}
 function selectTool(elem, id) {
   for (var i = 0; i < g_selectToolElements.length; ++i) {
     g_selectToolElements[i].className = i == id ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
   }
   tool = id;
+}
+function selectShape(elem, id) {
+  for (var i = 0; i < g_selectShapeElements.length; ++i) {
+    g_selectShapeElements[i].className = i == id ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
+  }
+  shape = id;
+  redraw();
 }
 
 function setupButtons() {
@@ -1107,6 +1025,49 @@ function setupButtons() {
         selectTool(elem, id);
       }}(elem, ii);
   }
+
+  g_selectShapeElements = [];
+  for (var ii = 0; ii < 100; ++ii) {
+    var elem = document.getElementById("selectShape" + ii);
+    if (!elem) {
+      break;
+    }
+    g_selectShapeElements.push(elem);
+    elem.onclick = function(elem, id) {
+      return function () {
+        selectShape(elem, id);
+      }}(elem, ii);
+  }
+  g_setPresetElements = [];
+  for (var ii = 0; ii < 100; ++ii) {
+    var elem = document.getElementById("setPreset" + ii);
+    if (!elem) {
+      break;
+    }
+    g_setPresetElements.push(elem);
+    elem.onclick = function(elem, id) {
+      return function () {
+        setPreset(elem, id);
+      }}(elem, ii);
+  }
+}
+
+function setupFps() {
+  const times = [];
+
+  function refreshLoop() {
+    window.requestAnimationFrame(() => {
+      const now = performance.now();
+      while (times.length > 0 && times[0] <= now - 1000) {
+        times.shift();
+      }
+      times.push(now);
+      fps = times.length;
+      refreshLoop();
+    });
+  }
+
+  refreshLoop();
 }
 
 // Utils
@@ -1123,21 +1084,27 @@ function dragDirection() {
   return Math.atan2(curDrag[1] - prevDrag[1], curDrag[0] - prevDrag[0]);
 }
 
+// square root of 3 over 2
+const hex_factor = 0.8660254037844386;
+
 function ScreenToState(x, y) {
-  var px = (((x - resolution[0] / 2) - camera[0] * zoom) / resolution[0]);
-  var py = (((resolution[1] - (y - camera[1] * zoom) - resolution[1] / 2)) / resolution[1]);
+  // Adjust canvas coords for camera and zoom.
+  var p = ScreenToPt(x, y);
 
-  px *= statesize[0] * (resolution[0] / (viewsize[0] * zoom));
-  py *= statesize[1] * (resolution[1] / (viewsize[1] * zoom));
+  // transform canvas coords to state coords according to view.
+  var px = (p[0] * (statesize[0] / viewsize[0]) + statesize[0] / 4) / hex_factor;
+  var py = p[1] * (statesize[1] / viewsize[1]) * -1 + statesize[0] / 4;
 
-  return {x: px * 1.17 + 0.295 * statesize[0], y: py * 0.985 + 0.26 * statesize[1]};
+  return {x: px , y: py};
 }
+
 function ScreenToPt(x, y) {
   const px = (x - resolution[0] / 2) / zoom - camera[0];
   const py = (y - resolution[1] / 2) / zoom - camera[1];
 
   return [px, py];
 }
+
 function PtToScreen(px, py) {
   x = (zoom * (px + camera[0])) + resolution[0] / 2;
   y = (zoom * (py + camera[1])) + resolution[1] / 2;
@@ -1148,19 +1115,9 @@ function PtToScreen(px, py) {
 function applyDrag() {
   camera[0] += (curDrag[0] - prevDrag[0]) / zoom;
   camera[1] += (curDrag[1] - prevDrag[1]) / zoom;
+  cameraDest[0] += (curDrag[0] - prevDrag[0]) / zoom;
+  cameraDest[1] += (curDrag[1] - prevDrag[1]) / zoom;
   prevDrag = curDrag;
 
-  drawy();
-}
-
-function applyZoom(amount) {
-  zoom += amount * (zoom / 20.0);
-
-  drawy();
-}
-
-function setZoom(newZoom) {
-  zoom = newZoom;
-
-  drawy();
+  redraw();
 }
