@@ -61,14 +61,16 @@ var shape = ToolShape.circle;
 var speed = 25;
 var timers = [];
 
-const E=1, SE=2, SW=4, W=8, NW=16, NE=32, REST=64, BOUNDARY=128;
+var rulebookController;
 const directionCircle = [NW, SW, W, SE, NE, E];
-var collisionRules;
+var selectedBook;
 
 var gl, gl2Available = false;
 var buffers, programs, framebuffers, textures;
 var curDrag, prevDrag;
 var cameraDest = [0., 0.];
+
+var fpsLabel;
 
 main();
 
@@ -76,12 +78,14 @@ function main() {
   setupWebGL();
   setupShaderStructs();
 
+  setupFps();
+
   setupDefault();
   start();
 
   setupButtons();
+  setupRulebookUI();
   setupEventHandlers();
-  setupFps();
 }
 
 function setupWebGL() {
@@ -90,9 +94,10 @@ function setupWebGL() {
 
   if (gl) {
     gl2Available = true;
-  } else {
-    gl = canvas.getContext('webgl');
   }
+  // else {
+  //   gl = canvas.getContext('webgl');
+  // }
 
   if (!gl) {
     const text = `
@@ -125,6 +130,7 @@ function setupShaderStructs() {
       quad: gl.getAttribLocation(programs.col, 'quad'),
       state: gl.getUniformLocation(programs.col, 'state'),
       scale: gl.getUniformLocation(programs.col, 'scale'),
+      oldSize: gl.getUniformLocation(programs.col, 'oldSize'),
       colissionMap: gl.getUniformLocation(programs.col, 'colissionMap'),
       tool: gl.getUniformLocation(programs.col, 'tool'),
       shape: gl.getUniformLocation(programs.col, 'shape'),
@@ -143,8 +149,13 @@ function setupShaderStructs() {
 }
 
 function setupDefault() {
+
+  rulebookController = new RulesController(function () {
+    selectedBook = rulebookController.selectedBook;
+  });
+
   recalculateTextures();
-  initCollisionRules();
+  selectedBook = rulebookController.selectedBook;
 
   zoom = 100 / statesize[0];
   camera = [-resolution[0] * 2.5, resolution[1] * (3 * resolution[0] / resolution[1])];
@@ -152,13 +163,22 @@ function setupDefault() {
   updatePreset();
 }
 
+function colissionMap() {
+  return selectedBook.colissionMap();
+}
+
+function setupRulebookUI() {
+  rulebookController.setupUI();
+}
+
 function resize() {
   pause();
   var oldFront = textures.front;
+  var oldStatesize = statesize;
   recalculateTextures();
 
   textures.front = oldFront;
-  step();
+  stepResize(oldStatesize);
   textures.back = createTexture(gl.REPEAT, gl.NEAREST);
   step();
   redraw();
@@ -279,110 +299,47 @@ function migrate(oldState) {
   redraw();
 }
 
-function initCollisionRules() {
-  // We're following:
-  // [1] Wylie, 1990:       http://pages.cs.wisc.edu/~wylie/doc/PhD_thesis.pdf
-  // [2] Arai et al., 2007: http://www.fz-juelich.de/nic-series/volume38/arai.pdf
-  // (see also: [3] Wolf-Gladrow, 2000: http://epic.awi.de/Publications/Wol2000c.pdf)
+function createImageFromTexture(texture, width, height) {
+    // Create a framebuffer backed by the texture
+    var framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
 
-  // N.B. Interestingly, [2] and [3] seem to miss out several FHP collisions,
-  //  e.g. [2] has REST+NE+SE+W and NW+NE+SW+SE in different classes, likewise E+W+REST and NE+SE+W
-  //  (also in [2] the last transition in Fig. 6 is misprinted (mass conservation error) and again in
-  //   Procedure 3 in Fig. 7)
-  //  e.g. [3] misses NE+SE+W <-> E+W+REST
+    // Read the contents of the framebuffer
+    var data = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data);
 
-  // A "collision class" [2] is a set of states that can be swapped at will, without
-  // affecting the mass or momentum of that node. For best results, a gas should be
-  // "collision-saturated" - it swaps everything that can be swapped.
+    gl.deleteFramebuffer(framebuffer);
 
-  // these are some possible collision classes to choose from:
-  // first four from Fig. 1.6 in [1], for FHP6
-  const pair_head_on = [[E+W, NE+SW, NW+SE]]; // i) "linear"
-  const symmetric_3 = [[E+NW+SW, W+NE+SE]]; // ii) "triple"
-  const two_plus_spectator = [ // iii) "lambda"
-      [E+SW+NE, E+SE+NW], [SE+E+W, SE+NE+SW], [SW+E+W, SW+NW+SE],
-      [W+NW+SE, W+NE+SW], [NW+E+W, NW+NE+SW], [NE+E+W, NE+NW+SE]];
-  const four_particles = [[NE+NW+SE+SW, E+W+SE+NW, E+W+NE+SW]]; // iv) "dual-linear"
-  // next ones from Fig. 1.9 in [1], for FHP7
-  const pair_head_on_plus_rest = // ii) and iii) "triple" and "linear+rest"
-      [[E+W+REST, NE+SW+REST, NW+SE+REST, E+NW+SW, W+NE+SE]];
-  const pair_head_on_plus_rest_no_triple = // iii) "linear+rest" (used in FHP-II)
-      [[E+W+REST, NE+SW+REST, NW+SE+REST]];
-  const one_plus_rest = [ // iv) and v) "fundamental+rest" and "jay"
-      [E+REST, SE+NE], [NE+REST, E+NW], [NW+REST, W+NE],
-      [W+REST, NW+SW], [SW+REST, W+SE], [SE+REST, SW+E]];
-  const two_plus_spectator_including_rest = [ // vi) and (vii) "lambda" and "jay+rest"
-      [E+SW+NE, E+SE+NW, NE+SE+REST], [SE+E+W, SE+NE+SW, E+SW+REST],
-      [SW+E+W, SW+NW+SE, W+SE+REST], [W+NW+SE, W+NE+SW, NW+SW+REST],
-      [NW+E+W, NW+NE+SW, NE+W+REST], [NE+E+W, NE+NW+SE, NW+E+REST]];
-  const four_particles_including_rest_no_momentum = // viii) and ix) "dual-linear" and "dual-triple + rest"
-      [[NE+NW+SE+SW, E+W+SE+NW, E+W+NE+SW, E+NW+SW+REST, W+NE+SE+REST]];
-  const symmetric_3_plus_rest = [[E+NW+SW+REST, W+NE+SE+REST]]; // "dual-triple + rest" (used in FHP-II)
-  const four_particles_plus_rest = [[NE+NW+SE+SW+REST, E+W+SE+NW+REST, E+W+NE+SW+REST]]; // x) "dual-linear + rest"
-  const five_particles_including_rest_momentum_one = [ // xi) and xii) "dual-fundamental" and "dual-jay + rest"
-      [NE+NW+W+SW+SE, E+W+NW+SW+REST], [E+NE+NW+W+SW, NW+SE+NE+W+REST],
-      [SE+E+NE+NW+W, SW+NE+E+NW+REST], [SW+SE+E+NE+NW, W+E+NE+SE+REST],
-      [W+SW+SE+E+NE, NW+SE+E+SW+REST], [NW+W+SW+SE+E, NE+SW+W+SE+REST]];
-  const two_plus_spectator_plus_rest = [ // xiii) and xiv) "dual-lambda + rest" and "dual-jay"
-      [E+SW+NE+REST, E+SE+NW+REST, NE+SE+E+W], [SE+E+W+REST, SE+NE+SW+REST, E+SW+SE+NW],
-      [SW+E+W+REST, SW+NW+SE+REST, W+SE+SW+NE], [W+NW+SE+REST, W+NE+SW+REST, NW+SW+W+E],
-      [NW+E+W+REST, NW+NE+SW+REST, NE+W+NW+SE], [NE+E+W+REST, NE+NW+SE+REST, NW+E+NE+SW]];
-  // now select which of these collision classes we're going to use:
-  collisionRules = [];
-  switch(type)
-    {
-        case GasType.FHPI:
-            collisionRules.push(pair_head_on);
-            collisionRules.push(symmetric_3);
-            break;
-        case GasType.FHPII:
-            collisionRules.push(pair_head_on);
-            collisionRules.push(symmetric_3);
-            collisionRules.push(pair_head_on_plus_rest_no_triple);
-            collisionRules.push(symmetric_3_plus_rest);
-            collisionRules.push(one_plus_rest);
-            break;
-        case GasType.FHPIII: // FHP7, collision-saturated
-            collisionRules.push(pair_head_on);
-            collisionRules.push(pair_head_on_plus_rest);
-            collisionRules.push(one_plus_rest);
-            collisionRules.push(two_plus_spectator_including_rest);
-            collisionRules.push(four_particles_including_rest_no_momentum);
-            collisionRules.push(four_particles_plus_rest);
-            collisionRules.push(five_particles_including_rest_momentum_one);
-            collisionRules.push(two_plus_spectator_plus_rest);
-            break;
-        case GasType.FHP6: // FHP6, collision-saturated
-            collisionRules.push(pair_head_on);
-            collisionRules.push(symmetric_3);
-            collisionRules.push(two_plus_spectator);
-            collisionRules.push(four_particles);
-            break;
-    }
-    collisionRules = collisionRules.flat();
+    var canvas = document.createElement("canvas");
+
+    document.body.appendChild(canvas); // for Firefox
+
+    // var canvas = document.querySelector('#placeholder');
+    var context = canvas.getContext('2d');
+
+    // Copy the pixels to a 2D canvas
+    var imageData = context.createImageData(width, height);
+    imageData.data.set(data);
+    context.putImageData(imageData, 0, 0);
+
+    // var img = new Image();
+    // img.src = ;
+    return canvas.toDataURL("image/png").replace(/^data:image\/[^;]/, 'data:application/octet-stream');
 }
 
-function shuffleArray(array) {
-    for (var i = array.length - 1; i > 0; i--) {
-        var j = Math.floor(Math.random() * (i + 1));
-        var temp = array[i];
-        array[i] = array[j];
-        array[j] = temp;
-    }
+function saveBase64AsFile(base64, fileName) {
+    var link = document.createElement("a");
+
+    document.body.appendChild(link); // for Firefox
+
+    link.setAttribute("href", base64);
+    link.setAttribute("download", fileName);
+    link.click();
 }
 
-function colissionMap() {
-  var result = new Int8Array(129);
-  for (var i = 0; i < 128; i++) {
-    result[i] = i;
-  }
-  collisionRules.forEach((item, i) => {
-    shuffleArray(item);
-    for (var i = 0; i < item.length; i++) {
-      result[item[i]] = (i == item.length - 1) ? item[0] : item[i + 1];
-    }
-  });
-  return result;
+function save() {
+  saveBase64AsFile(createImageFromTexture(textures.front, statesize[0], statesize[1]), "automaton.png");
 }
 
 function setRandom() {
@@ -429,8 +386,8 @@ function updatePreset() {
   stepProgram(programs.col, programVars.col, preset);
 }
 
-function stepResize() {
-  stepProgram(programs.col, programVars.col, OperationType.resize);
+function stepResize(oldSize) {
+  stepProgram(programs.col, programVars.col, OperationType.resize, oldSize);
 }
 
 function stepRandom() {
@@ -449,7 +406,7 @@ function step() {
   stepProgram(programs.col, programVars.col, OperationType.collision);
 }
 
-function stepProgram(program, vars, operation) {
+function stepProgram(program, vars, operation, oldSize) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.step);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
                           gl.TEXTURE_2D, textures.back, 0);
@@ -482,6 +439,9 @@ function stepProgram(program, vars, operation) {
         break;
     }
   }
+  if (oldSize) {
+    gl.uniform2f(vars.oldSize, oldSize[0], oldSize[1]);
+  }
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
@@ -513,7 +473,7 @@ function redraw() {
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-  document.getElementById("fpsLabel").innerHTML = "fps: " + fps;
+  fpsLabel.innerHTML = "fps: " + fps;
 }
 
 function start() {
@@ -663,59 +623,7 @@ function subset(texture, source, xoff, yoff, width, height) {
                          gl.RGBA_INTEGER, gl.BYTE, source);
 };
 
-function applyTool(point, toolType) {
-  const resultLength = toolRadius * toolRadius * 4 * 4;
-  var result = new Int8Array(resultLength);
-  switch (toolType) {
-    case ToolType.wall:
-    case ToolType.clear:
-      for (var x = 0; x < resultLength; x++) {
-          result[x] = toolType == ToolType.wall ? 128 : 0;
-      }
-      break;
-    case ToolType.fan:
 
-      const prob = 0.2;
-      if (curDrag == null) {
-        for (var x = 0; x < resultLength; x++) {
-          var aux_bit = 0; //Init
-          //Get a random number with a p% of ones
-          for (var b = 0; b < 8; b++)
-          {
-              aux_bit = (Math.random() <= prob ? 1 : 0) ^ (aux_bit << 1); //Add the one or zero
-          }
-          result[x] = aux_bit;
-        }
-      } else {
-        const strength = dragDistance() / Math.min(resolution[0], resolution[1]);
-        const direction = Math.PI * 2 - (dragDirection() + Math.PI);
-
-        for (var x = 0; x < resultLength; x++) {
-          for (var attempt = 0; attempt < 4; attempt++) {
-            if (Math.random() > strength) {
-              const i = (direction + (Math.random() - 0.5)) | 0;
-              if (i >= 0 && i < 6) {
-                result[x] |= directionCircle[i];
-              }
-            }
-          }
-        }
-      }
-      break;
-
-  }
-
-  const startX = Math.round(point.y - toolRadius);
-  const startY = Math.round(point.x - toolRadius);
-  const endX = Math.round(statesize[0] - (point.y + toolRadius));
-  const endY = Math.round(statesize[1] - (point.x + toolRadius));
-
-  const width = toolRadius * 2 + (startX >= 0 ? 0 : startX) + (endX >= 0 ? 0 : endX);
-  const height = toolRadius * 2 + (startY >= 0 ? 0 : startY) + (endY >= 0 ? 0 : endY);
-
-  subset(textures.front, result, startX >= 0 ? startX : 0, startY >= 0 ? startY : 0, width, height);
-  redraw();
-}
 
 function setupEventHandlers() {
 
@@ -850,7 +758,7 @@ function setupEventHandlers() {
     }
   })
 
-  window.addEventListener("wheel", e => {
+  canvas.addEventListener("wheel", e => {
     e.preventDefault();
 
     const zoomAmount = -Math.sign(e.deltaY);
@@ -878,12 +786,12 @@ function setupEventHandlers() {
   }, { passive: false });
 
   // Disable context menu for right click.
-  if (document.addEventListener) {
-      document.addEventListener('contextmenu', function (e) {
+  if (canvas.addEventListener) {
+      canvas.addEventListener('contextmenu', function (e) {
           e.preventDefault();
       }, false);
   } else {
-      document.attachEvent('oncontextmenu', function () {
+      canvas.attachEvent('oncontextmenu', function () {
           window.event.returnValue = false;
       });
   }
@@ -957,27 +865,32 @@ function setupEventHandlers() {
     resize();
   });
 
-  var fpsContainer = document.querySelector('#fpsContainer');
-  fpsContainer.addEventListener("pointerdown", function(e){
-      e.stopPropagation();
-  });
-  var toolsContainer = document.querySelector('#toolsContainer');
-  toolsContainer.addEventListener("pointerdown", function(e){
-      e.stopPropagation();
-  });
+  // var shareButton = document.querySelector('#save');
+  // shareButton.addEventListener('pointerdown', function() {
+  //   save();
+  // });
+
+  var uiContainer = document.querySelector('#uiContainer');
+  var hideUIButton = document.querySelector('#hideUI');
+  function onUIHide() {
+    if (uiContainer.style.display == "none") {
+      uiContainer.style.display = "block"
+      hideUIButton.innerHTML = "Hide UI"
+    } else {
+      uiContainer.style.display = "none"
+      hideUIButton.innerHTML = "Show UI"
+    }
+  }
+  if ('onpointerdown' in window) {
+    hideUIButton.addEventListener('pointerdown', onUIHide);
+  } else {
+    hideUIButton.addEventListener('touchstart', onUIHide);
+  }
 }
 
-var g_setSettingsElements;
 var g_setPresetElements;
 var g_selectToolElements;
 var g_selectShapeElements;
-function setSetting(elem, id) {
-  for (var i = 0; i < g_setSettingsElements.length; ++i) {
-    g_setSettingsElements[i].style.color = i == id ? "red" : "gray"
-  }
-  type = id;
-  initCollisionRules();
-}
 function setPreset(elem, id) {
   for (var i = 0; i < g_setPresetElements.length; ++i) {
     g_setPresetElements[i].style.color = i == id ? "red" : "gray"
@@ -989,7 +902,7 @@ function selectTool(elem, id) {
   for (var i = 0; i < g_selectToolElements.length; ++i) {
     g_selectToolElements[i].className = i == id ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
   }
-  tool = id;
+  tool = id == 2 ? 128 : id;
 }
 function selectShape(elem, id) {
   for (var i = 0; i < g_selectShapeElements.length; ++i) {
@@ -1000,18 +913,6 @@ function selectShape(elem, id) {
 }
 
 function setupButtons() {
-  g_setSettingsElements = [];
-  for (var ii = 0; ii < 100; ++ii) {
-    var elem = document.getElementById("setSetting" + ii);
-    if (!elem) {
-      break;
-    }
-    g_setSettingsElements.push(elem);
-    elem.onclick = function(elem, id) {
-      return function () {
-        setSetting(elem, id);
-      }}(elem, ii);
-  }
 
   g_selectToolElements = [];
   for (var ii = 0; ii < 100; ++ii) {
@@ -1054,6 +955,7 @@ function setupButtons() {
 
 function setupFps() {
   const times = [];
+  fpsLabel = document.getElementById("fpsLabel");
 
   function refreshLoop() {
     window.requestAnimationFrame(() => {
@@ -1083,9 +985,6 @@ function dragDistance() {
 function dragDirection() {
   return Math.atan2(curDrag[1] - prevDrag[1], curDrag[0] - prevDrag[0]);
 }
-
-// square root of 3 over 2
-const hex_factor = 0.8660254037844386;
 
 function ScreenToState(x, y) {
   // Adjust canvas coords for camera and zoom.

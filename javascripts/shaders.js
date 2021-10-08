@@ -153,6 +153,7 @@ const collisionShader = `#version 300 es
 
   uniform highp isampler2D state;
   uniform vec2 scale;
+  uniform vec2 oldSize;
   uniform int colissionMap[129];
   uniform vec3 tool;
   uniform int shape;
@@ -213,10 +214,17 @@ const collisionShader = `#version 300 es
 
   void calcCollision(inout ivec4 data, ivec2 position) {
     int prtcl = data.x;
+
     if (prtcl == BOUNDARY) { return; }
+
     int result = prtcl & REST;
     ivec2 nbors[6];
-    if (position.y % 2 == 0) { nbors = evenNbors; } else { nbors = oddNbors; }
+    if (position.y % 2 == 0) {
+      nbors = evenNbors;
+    } else {
+      nbors = oddNbors;
+    }
+
     for (int dir = 0, odir = 3; dir < 6; dir++, odir = (odir + 1) % 6) {
       ivec2 nborPosition = periodicCoordinate(position + nbors[odir], ivec2(scale));
       int nbor = texelFetch(state, nborPosition, 0).x;
@@ -231,9 +239,13 @@ const collisionShader = `#version 300 es
     data.x = colissionMap[result];
   }
 
+  int rand(vec2 co){
+    return int(fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453) * 64.0);
+  }
+
   void generateRandom(inout ivec4 data, ivec2 position) {
-    int random = xorshift(position.x * position.y) % 128;
-    if ((random & BOUNDARY) != BOUNDARY) {
+    int random = rand(vec2(position));
+    if ((random & BOUNDARY) != BOUNDARY && (random & REST) != REST) {
       data.x = random;
     }
   }
@@ -241,13 +253,39 @@ const collisionShader = `#version 300 es
   void generateWind(inout ivec4 data, ivec2 position) {
     vec2 pos = vec2(position);
     if (pos.x < scale.x * 0.02 || pos.x > scale.x * 0.98 ||
-        (pos.y < scale.y * 0.32 && pos.y > scale.y * 0.3 && pos.x < scale.x * 0.7 && pos.x > scale.x * 0.3)) {
+        (pos.y < scale.y * 0.82 && pos.y > scale.y * 0.8 && pos.x < scale.x * 0.6 && pos.x > scale.x * 0.4)) {
         data.x = BOUNDARY;
-    } else if (pos.y > scale.y * 0.33) {
-        int random = xorshift(position.x * position.y) % 128;
-        if ((random & E) == E) {
-          data.x = random;
+    // } else if (pos.y < scale.y * 0.66 && pos.y > scale.y * 0.33) {
+    // } else if (position.x % 2 == 0 && position.y % 2 == 0) {
+      // int random = rand(pos);
+      //   if (((random & NE) == NE) || ((random & NW) == NW)) {
+      //     data.x = NE+NW;
+      //   }
+    } else {
+      data.x = NE+NW + rand(pos);
+    }
+  }
+
+  void calculateResize(inout ivec4 data, ivec2 position) {
+    ivec2 oldStateSize = ivec2(oldSize);
+    vec2 pos = vec2(position);
+
+    if (oldStateSize.x >= int(scale.x)) {
+      float prtclDiameter = float(oldStateSize.x) / scale.x;
+      pos *= prtclDiameter;
+      pos -= prtclDiameter / 2.0;
+      int addState = 0;
+
+      for (float i = 0.0; i <= prtclDiameter; i += 1.0) {
+        for (float j = 0.0; j <= prtclDiameter; j += 1.0) {
+          addState += texelFetch(state, ivec2(pos.x + i, pos.y + j), 0).x;
         }
+      }
+
+      data.x = addState / int(prtclDiameter * prtclDiameter);
+    } else {
+      pos /= scale.x / float(oldStateSize.x);
+      data.x = texelFetch(state, ivec2(pos), 0).x;
     }
   }
 
@@ -311,6 +349,9 @@ const collisionShader = `#version 300 es
         break;
       case clear:
         data.x = Nothing;
+        break;
+      case resize:
+        calculateResize(data, position);
         break;
     }
 

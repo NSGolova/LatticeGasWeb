@@ -9,9 +9,26 @@
     <meta property="og:image" content="https://www.golova.dev/experiments/images/preview.png">
     <meta property="og:title" content="Lattice gas state automata">
     <meta property="og:type" content="website">
-    <link rel="apple-touch-icon" sizes="180x180" href="images/favicon-180.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="images/favicon-16.png">
+    <link rel="apple-touch-icon-precomposed" sizes="57x57" href="images/apple-touch-icon-57x57.png" />
+    <link rel="apple-touch-icon-precomposed" sizes="114x114" href="images/apple-touch-icon-114x114.png" />
+    <link rel="apple-touch-icon-precomposed" sizes="72x72" href="images/apple-touch-icon-72x72.png" />
+    <link rel="apple-touch-icon-precomposed" sizes="144x144" href="images/apple-touch-icon-144x144.png" />
+    <link rel="apple-touch-icon-precomposed" sizes="60x60" href="images/apple-touch-icon-60x60.png" />
+    <link rel="apple-touch-icon-precomposed" sizes="120x120" href="images/apple-touch-icon-120x120.png" />
+    <link rel="apple-touch-icon-precomposed" sizes="76x76" href="images/apple-touch-icon-76x76.png" />
+    <link rel="apple-touch-icon-precomposed" sizes="152x152" href="images/apple-touch-icon-152x152.png" />
+    <link rel="icon" type="image/png" href="images/favicon-196x196.png" sizes="196x196" />
+    <link rel="icon" type="image/png" href="images/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/png" href="images/favicon-32x32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="images/favicon-16x16.png" sizes="16x16" />
+    <link rel="icon" type="image/png" href="images/favicon-128.png" sizes="128x128" />
+    <meta name="application-name" content="&nbsp;"/>
+    <meta name="msapplication-TileColor" content="#FFFFFF" />
+    <meta name="msapplication-TileImage" content="images/mstile-144x144.png" />
+    <meta name="msapplication-square70x70logo" content="images/mstile-70x70.png" />
+    <meta name="msapplication-square150x150logo" content="images/mstile-150x150.png" />
+    <meta name="msapplication-wide310x150logo" content="images/mstile-310x150.png" />
+    <meta name="msapplication-square310x310logo" content="images/mstile-310x310.png" />
 
     <meta name="twitter:title" content="golova.dev">
     <meta name="twitter:description" content="Interactive lattice gas web toy.">
@@ -19,20 +36,18 @@
     <meta name="twitter:image" content="https://www.golova.dev/experiments/images/preview.png">
     <meta name="twitter:image:alt" content="Gasomaton">
     <meta name="twitter:card" content="summary">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
   </head>
   <body>
     <div><label id="logoLabel">Gasomaton</label></div>
-    <div id="fpsContainer" onclick="">
+    <div><a id="hideUI">Hide UI</a></div>
+    <div id="uiContainer">
+    <div id="rulebookContainer" onclick="">
       <div id="topUI">
-      <div class="menuTitle">Gas type</div>
-      <div class="clickable" id="setSetting0">FHP I</div>
-      <div class="clickable" id="setSetting1">FHP II</div>
-      <div class="clickable" id="setSetting2" style="color: red;">FHP III</div>
-      <div class="clickable" id="setSetting3">FHP 6</div>
-      <div><label id="speedLabel">Speed: 25step</label></div>
-      <div><input type="range" id="speed" min="1" max="200" value="25"></div>
-      <div><label id="resolutionLabel">Details: 1x</label></div>
-      <div><input type="range" id="resolution" min="1" max="50" value="1"></div>
+      <div class="menuTitle">Rulebooks <input id="showRulebook" type="button" value="Show details"></div>
+      <div class="rulePicker"></div>
+      <div class='rulebook' style="display: none;"></div>
       <div class="linkContainer">
         <a href="https://youtu.be/" style="disabled: true;">
           <img src="./images/youtube.png" width="32" height="32" title="Video explanation (WIP)">
@@ -52,25 +67,31 @@
       <div class="clickable" id="setPreset3" style="visibility: hidden; height: 0px;">SMTH</div>
       <div class="clickable" id="setPreset4">Empty</div>
       </div>
+      <!--<input id="save" type="button" value="Save"> -->
+      <!-- <input id="load" type="button" value="Load"> -->
     </div>
     <div id="toolsContainer" onclick="">
       <div id="topUI">
       <div class="menuTitle">Tool</div>
       <div class="tabrow" style="height: 35px;">
-        <div class="tabrow-tab tabrow-tab-opened-accented" id="selectTool0" title="Particle generator" style="line-height: 35px; display: block; background-image: url('./images/fan.png'); background-size: 28px;"></div>
-        <div class="tabrow-tab" id="selectTool1" title="Inpenetratable wall" style="line-height: 35px; display: block; background-image: url('./images/wall.png'); background-size: 28px;"></div>
-        <div class="tabrow-tab" id="selectTool2" title="Clear (or right-click)" style="line-height: 35px; display: block; background-image: url('./images/erase.png'); background-size: 28px;"></div>
+        <div class="tabrow-tab tabrow-tab-opened-accented" id="selectTool0" title="Particle generator (1)" style="line-height: 35px; display: block; background-image: url('./images/fan.png'); background-size: 28px;"></div>
+        <div class="tabrow-tab" id="selectTool1" title="Inpenetratable wall (2)" style="line-height: 35px; display: block; background-image: url('./images/wall.png'); background-size: 28px;"></div>
+        <div class="tabrow-tab" id="selectTool2" title="Clear (right-click or 3)" style="line-height: 35px; display: block; background-image: url('./images/erase.png'); background-size: 28px;"></div>
       </div>
       <div class="menuTitle">Shape</div>
       <div class="tabrow" style="height: 35px;">
         <div class="tabrow-tab tabrow-tab-opened-accented" id="selectShape0" title="Circle" style="line-height: 35px; display: block; background-image: url('./images/circle.png'); background-size: 28px;"></div>
         <div class="tabrow-tab" id="selectShape1" title="Square" style="line-height: 35px; display: block; background-image: url('./images/square.png'); background-size: 28px;"></div>
       </div>
-      <div style="padding: 10px; display: block;">
-      <div><label id="toolSizeLabel">Brush size: 2</label></div>
+      <div><label id="toolSizeLabel" title="Or Shift+Wheel">Brush size: 2</label></div>
       <div><input type="range" id="toolSize" min="1" max="1000" value="2" step="1"></div>
+      <div class="menuTitle">Settings</div>
+      <div><label id="speedLabel">Speed: 25step</label></div>
+      <div><input type="range" id="speed" min="1" max="200" value="25"></div>
+      <div><label id="resolutionLabel">Details: 1x</label></div>
+      <div><input type="range" id="resolution" min="1" max="115" value="1"></div>
       </div>
-      </div>
+    </div>
     </div>
     <div style="width: 100%; height: 100%; touch-action: none;">
       <canvas id="placeholder" width="1200" height="720" style="position: absolute; left: 0; top: 0; z-index: 0; width: 100%; height: 100%;"></canvas>
@@ -78,6 +99,8 @@
     </div>
     <div><label id="fpsLabel" style="position: absolute; left: 10; bottom: 10; z-index: 0;color: red;">fps: 0</label></div>
     <script src="./javascripts/Timer.js"></script>
+    <script src="./javascripts/RulesController.js"></script>
+    <script src="./javascripts/Rules.js"></script>
     <script src="./javascripts/shaders.js"></script>
     <script src="./javascripts/main.js"></script>
   </body>

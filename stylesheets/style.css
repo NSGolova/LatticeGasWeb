@@ -3,9 +3,9 @@ body {
   font: 14px "Lucida Grande", Helvetica, Arial, sans-serif;
 }
 
-#fpsContainer {
+#rulebookContainer {
     position: absolute;
-    top: 450px;
+    top: 465px;
     left: 10px;
     z-index: 3;
     color: gray;
@@ -17,7 +17,7 @@ body {
 
 #setupContainer {
     position: absolute;
-    top: 345px;
+    top: 360px;
     left: 10px;
     z-index: 3;
     color: gray;
@@ -29,7 +29,7 @@ body {
 
 #toolsContainer {
     position: absolute;
-    top: 50px;
+    top: 60px;
     left: 10px;
     z-index: 3;
     color: gray;
@@ -54,10 +54,20 @@ body {
   color: white;
   position: absolute;
   left: 10;
-  top: 10;
+  top: 6;
   z-index: 2;
 }
 
+#hideUI {
+  font: 16px "Lucida Grande", Helvetica, Arial, sans-serif;
+  color: white;
+  position: absolute;
+  left: 10;
+  top: 34;
+  z-index: 2;
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 #speedLabel {
   font: 16px "Lucida Grande", Helvetica, Arial, sans-serif;
@@ -110,15 +120,18 @@ body {
 
 .clickable {cursor: pointer;}
 
+.toggleButton {
+  display: inline;
+  padding-right: 5px;
+}
+
 .toggleButtonLabel {
-  top: 10px;
   position: relative;
   display: inline-block;
-  width: 30px;
-  height: 17px;
 }
 
 .switch {
+  top: -10px;
   position: relative;
   display: inline-block;
   width: 30px;
