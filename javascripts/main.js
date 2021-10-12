@@ -17,7 +17,8 @@ const OperationType = {
   initializeRandom: 1,
   initializeWind: 2,
   resize: 3,
-  clear: 4
+  clear: 4,
+  applyImage: 5
 };
 var preset = OperationType.initializeWind;
 
@@ -135,7 +136,8 @@ function setupShaderStructs() {
       tool: gl.getUniformLocation(programs.col, 'tool'),
       shape: gl.getUniformLocation(programs.col, 'shape'),
       toolInUse: gl.getUniformLocation(programs.col, 'toolInUse'),
-      operation: gl.getUniformLocation(programs.col, 'operation')
+      operation: gl.getUniformLocation(programs.col, 'operation'),
+      imageToApply: gl.getUniformLocation(programs.col, 'imageToApply')
     }
   }
 
@@ -215,11 +217,11 @@ function createTexture(wrap, filter, size) {
 
     gl.bindTexture(gl.TEXTURE_2D, texture);
     if (size) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size[0], size[1],
-                        0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, size[0], size[1],
+                        0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, null);
     } else {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8I, statesize[0], statesize[1],
-                        0, gl.RGBA_INTEGER, gl.BYTE, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, statesize[0], statesize[1],
+                        0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, null);
     }
 
     return texture;
@@ -246,7 +248,7 @@ function set(state) {
     gl.bindTexture(gl.TEXTURE_2D, textures.front);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0,
                      statesize[0], statesize[1],
-                     gl.RGBA_INTEGER, gl.BYTE, rgba);
+                     gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, rgba);
 }
 
 function get() {
@@ -254,15 +256,15 @@ function get() {
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.step);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
                             gl.TEXTURE_2D, textures.front, 0);
-    var rgba = new Int8Array(w * h * 4);
-    gl.readPixels(0, 0, w, h, gl.RGBA_INTEGER, gl.BYTE, rgba);
+    var rgba = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, rgba);
     var state = new Array(w);
 
     for (var i = 0; i < statesize[0]; i++) {
       state[i] = [];
       for (var j = 0; j < statesize[1]; j++) {
         var ii = i * statesize[0] + j;
-        state[i][j] = new Int8Array(4);
+        state[i][j] = new Uint8Array(4);
         for (var d = 0; d < 4; d++) {
           state[i][j][d] = rgba[ii * 4 + d];
         }
@@ -285,7 +287,7 @@ function migrate(oldState) {
     for (var i = 0; i < statesize[0]; i++) {
       result[i] = [];
       for (var j = 0; j < statesize[1]; j++) {
-        result[i][j] = new Int8Array(4);
+        result[i][j] = new Uint8Array(4);
         if (i > widthStart && i < widthEnd &&
         j > heigthStart && j < heightEnd) {
           for (var d = 0; d < 4; d++) {
@@ -307,13 +309,18 @@ function createImageFromTexture(texture, width, height) {
 
     // Read the contents of the framebuffer
     var data = new Uint8Array(width * height * 4);
-    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    gl.readPixels(0, 0, width, height, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, data);
+    for (var i = 0; i < data.length; i++) {
+      if (data[i] != 0 && data[i] != 128) {
+        data[i] -= 1;
+      }
+    }
 
     gl.deleteFramebuffer(framebuffer);
 
     var canvas = document.createElement("canvas");
-
-    document.body.appendChild(canvas); // for Firefox
+    canvas.width = width;
+    canvas.height = height;
 
     // var canvas = document.querySelector('#placeholder');
     var context = canvas.getContext('2d');
@@ -339,41 +346,87 @@ function saveBase64AsFile(base64, fileName) {
 }
 
 function save() {
-  saveBase64AsFile(createImageFromTexture(textures.front, statesize[0], statesize[1]), "automaton.png");
+  saveBase64AsFile(createImageFromTexture(textures.front, statesize[0], statesize[1]), "gasomaton.png");
 }
 
-function setRandom() {
-    const prob = 0.1;
-    var result = new Array(statesize[0]);
+function rgbaDataWithImage(image) {
+  var canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
 
-    for (var i = 0; i < statesize[0]; i++)
-    {
-        result[i] = [];
-        for (var j = 0; j < statesize[1]; j++)
-        {
-          result[i][j] = new Int8Array(4);
-            if (i < 2 || i > statesize[0] - 4 ||
-                j < 2 || j > statesize[1] - 4 ||
-                (j == statesize[1] / 4 && i > statesize[0] / 10 && i < (statesize[0] - statesize[0]/10))) {
-                  result[i][j][0] = 128;
-            } else {
-              for (var d = 0; d < 4; d++)
-              {
-                var aux_bit = 0; //Init
-                //Get a random number with a p% of ones
-                for (var b = 0; b < 8; b++)
-                {
-                    aux_bit = (Math.random() <= prob ? 1 : 0) ^ (aux_bit << 1); //Add the one or zero
-                }
-                if (aux_bit < 128 && (aux_bit == 1 || aux_bit == 2 || aux_bit == 8 || aux_bit == 32)) {
-                  result[i][j][d] = aux_bit; //Add to the cell
-                }
+  // var canvas = document.querySelector('#placeholder');
+  var context = canvas.getContext('2d');
+  context.drawImage(image, 0, 0);
 
-              }
-            }
-        }
+  return context.getImageData(0, 0, image.width, image.height).data;
+}
+
+function createTextureFromImage(image) {
+  statesize = [image.width, image.height];
+  textures = {
+      front: createTexture(gl.REPEAT, gl.NEAREST),
+      back: createTexture(gl.REPEAT, gl.NEAREST)
+  };
+
+  const uiData = rgbaDataWithImage(image);
+  var imgData = new Uint8Array(uiData);
+  for (var i = 0; i < imgData.length; i++) {
+    if (imgData[i] != 0 && imgData[i] != 128) {
+      imgData[i] += 1;
     }
-    set(result);
+  }
+
+  gl.bindTexture(gl.TEXTURE_2D, textures.front);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, statesize[0], statesize[1],
+                      0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, imgData);
+}
+
+function load() {
+  loadFile(createTextureFromImage);
+}
+
+function applyImage() {
+  loadFile(function (image) {
+
+    const uiData = rgbaDataWithImage(image);
+
+    const texture = createTexture(gl.REPEAT, gl.NEAREST, [image.width, image.height]);
+    textures.apply = texture;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, image.width, image.height,
+                        0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, uiData);
+
+    stepApplyImage();
+    textures.apply = null;
+  })
+}
+
+function loadFile(completion) {
+  var input = document.createElement('input');
+  input.type = 'file';
+
+  input.onchange = e => {
+
+     // getting a hold of the file reference
+     var file = e.target.files[0];
+
+     // setting up the reader
+     var reader = new FileReader();
+     reader.readAsDataURL(file);
+
+     // here we tell the reader what to do when it's done reading...
+     reader.onload = readerEvent => {
+        var content = readerEvent.target.result;
+        const img = new Image();
+        img.onload = function() {
+          completion(img);
+        }
+        img.src = content;
+     }
+
+  }
+
+  input.click();
 }
 
 function swap() {
@@ -402,6 +455,10 @@ function stepClear() {
   stepProgram(programs.col, programVars.col, OperationType.clear);
 }
 
+function stepApplyImage() {
+  stepProgram(programs.col, programVars.col, OperationType.applyImage);
+}
+
 function step() {
   stepProgram(programs.col, programVars.col, OperationType.collision);
 }
@@ -411,8 +468,13 @@ function stepProgram(program, vars, operation, oldSize) {
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
                           gl.TEXTURE_2D, textures.back, 0);
 
-  gl.activeTexture(gl.TEXTURE0 + 0);
+  gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, textures.front);
+
+  if (textures.apply) {
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, textures.apply);
+  }
 
   gl.viewport(0, 0, statesize[0], statesize[1]);
 
@@ -420,10 +482,14 @@ function stepProgram(program, vars, operation, oldSize) {
 
   drawScene(vars.quad);
 
+  if (textures.apply) {
+    gl.uniform1i(vars.imageToApply, 1);
+  }
+
   gl.uniform1i(vars.state, 0);
   gl.uniform1i(vars.operation, operation);
   gl.uniform2f(vars.scale, statesize[0], statesize[1]);
-  gl.uniform1iv(vars.colissionMap, colissionMap());
+  gl.uniform1uiv(vars.colissionMap, colissionMap());
   if (toolPosition) {
     gl.uniform3f(vars.tool, toolPosition.x, toolPosition.y, toolRadius);
     gl.uniform1i(vars.shape, shape);
@@ -615,15 +681,6 @@ function loadShader(gl, type, source) {
 
   return shader;
 }
-
-function subset(texture, source, xoff, yoff, width, height) {
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, xoff, yoff,
-                         width, height,
-                         gl.RGBA_INTEGER, gl.BYTE, source);
-};
-
-
 
 function setupEventHandlers() {
 
@@ -862,13 +919,23 @@ function setupEventHandlers() {
   document.getElementById("resolutionLabel").innerHTML = "Resolution: " + sizeMultiply + "x";
 
   window.addEventListener('resize', function() {
-    resize();
+    // resize();
   });
 
-  // var shareButton = document.querySelector('#save');
-  // shareButton.addEventListener('pointerdown', function() {
-  //   save();
-  // });
+  var saveButton = document.querySelector('#save');
+  saveButton.addEventListener('pointerdown', function() {
+    save();
+  });
+
+  var loadButton = document.querySelector('#load');
+  loadButton.addEventListener('pointerdown', function() {
+    load();
+  });
+
+  var applyButton = document.querySelector('#applyImage');
+  applyButton.addEventListener('pointerdown', function() {
+    applyImage();
+  });
 
   var uiContainer = document.querySelector('#uiContainer');
   var hideUIButton = document.querySelector('#hideUI');

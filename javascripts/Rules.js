@@ -410,7 +410,7 @@ class RuleBook {
 
   //TODOL move this to shader
   colissionMap() {
-    var result = new Int8Array(129);
+    var result = new Uint8Array(129);
     for (var i = 0; i < 128; i++) {
       result[i] = i;
     }

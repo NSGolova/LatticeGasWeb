@@ -5,7 +5,7 @@ body {
 
 #rulebookContainer {
     position: absolute;
-    top: 465px;
+    top: 530px;
     left: 10px;
     z-index: 3;
     color: gray;
@@ -82,6 +82,10 @@ body {
 #resolutionLabel {
   font: 16px "Lucida Grande", Helvetica, Arial, sans-serif;
   color: black;
+}
+
+#buttonGroup {
+  padding-top: 15px;
 }
 
 .tabrow {
