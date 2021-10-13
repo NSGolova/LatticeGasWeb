@@ -343,7 +343,7 @@ const collisionShader = `#version 300 es
   void calculateApplyImage(inout uvec4 data, ivec2 position) {
     uvec4 imageData = texelFetch(imageToApply, ivec2(position.y, int(scale.x) - position.x), 0);
     uint sum = imageData.x + imageData.y + imageData.z;
-    if (sum < 580u || sum == 0u) {
+    if (sum > 550u || sum == 0u) {
       data.x = BOUNDARY;
     } else {
       data.x = sum / 6u;

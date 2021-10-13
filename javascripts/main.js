@@ -41,7 +41,7 @@ const ToolType = {
 var tool = ToolType.fan;
 // Tool for the right mouse button.
 var secondaryTool = ToolType.clear;
-var toolRadius = 10;
+var toolRadius = 25; // 0.5 of shown
 var toolPosition;
 
 const ToolMode = {
@@ -810,7 +810,7 @@ function setupEventHandlers() {
         pause();
       }
     }
-    if (isFinite(event.key)) {
+    if (isFinite(event.key) && event.target == document.body) {
       selectTool(null, parseInt(event.key) - 1);
     }
   })
@@ -821,8 +821,8 @@ function setupEventHandlers() {
     const zoomAmount = -Math.sign(e.deltaY);
 
     if (e.shiftKey) {
-      toolRadius += Math.round(zoomAmount * (toolRadius / 20.0));
-      document.getElementById("toolSizeLabel").innerHTML = "Brush size: " + toolRadius * 2;
+      toolRadius += zoomAmount * (toolRadius / 20.0);
+      document.getElementById("toolSizeInput").value = "" + Math.round(toolRadius * 2);
       toolSizeLabel.value = toolRadius * 2;
     } else {
       const cameraFp = ScreenToPt(e.pageX, e.pageY);
@@ -893,30 +893,48 @@ function setupEventHandlers() {
   });
 
   var speedLabel = document.querySelector('#speed');
+  var speedInput = document.querySelector('#speedInput');
+  speedInput.addEventListener('input', function() {
+    speed = this.value;
+    speedLabel.value = speed;
+    start();
+  });
   speedLabel.addEventListener('input', function() {
-    document.getElementById("speedLabel").innerHTML = "Speed: " + this.value + "step";
+    speedInput.value = "" + this.value;
     speed = this.value;
     start();
   });
   speedLabel.value = speed;
-  document.getElementById("speedLabel").innerHTML = "Speed: " + speed + "step";
+  speedInput.value = "" + speed;
 
   var toolSizeLabel = document.querySelector('#toolSize');
+  var toolSizeInput = document.querySelector('#toolSizeInput');
   toolSizeLabel.addEventListener('input', function() {
-    document.getElementById("toolSizeLabel").innerHTML = "Brush size: " + this.value;
+    toolSizeInput.value = "" + this.value;
     toolRadius = this.value / 2;
   });
+  toolSizeInput.addEventListener('input', function() {
+
+    toolRadius = this.value / 2;
+    toolSizeLabel.value = toolRadius * 2;
+  });
   toolSizeLabel.value = toolRadius * 2;
-  document.getElementById("toolSizeLabel").innerHTML = "Brush size: " + toolRadius * 2;
+  toolSizeInput.value = "" + toolRadius * 2;
 
   var resolutionLabel = document.querySelector('#resolution');
+  var resolutionInput = document.querySelector('#resolutionInput');
   resolutionLabel.addEventListener('input', function() {
-    document.getElementById("resolutionLabel").innerHTML = "Resolution: " + this.value + "x";
+    resolutionInput.value = "" + this.value;
+    sizeMultiply = this.value;
+    resize();
+  });
+  resolutionInput.addEventListener('input', function() {
+    resolutionLabel.value = this.value;
     sizeMultiply = this.value;
     resize();
   });
   resolutionLabel.value = sizeMultiply;
-  document.getElementById("resolutionLabel").innerHTML = "Resolution: " + sizeMultiply + "x";
+  resolutionInput.value = "" + sizeMultiply;
 
   window.addEventListener('resize', function() {
     // resize();

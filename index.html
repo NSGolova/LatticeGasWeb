@@ -6,8 +6,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"
               integrity="sha512-zhHQR0/H5SEBL3Wn6yYSaTTZej12z0hVZKOv3TwCUXT1z5qeqGcXJLLrbERYRScEDDpYIJhPC1fk31gqR783iQ=="
               crossorigin="anonymous"></script>
-    <meta property="og:image" content="https://www.golova.dev/experiments/images/preview.png">
-    <meta property="og:title" content="Lattice gas state automata">
+    <meta property="og:image" content="https://www.golova.dev/automata/images/preview2.png">
+    <meta property="og:title" content="Gasomaton \n Interactive lattice gas toy.">
     <meta property="og:type" content="website">
     <link rel="apple-touch-icon-precomposed" sizes="57x57" href="images/apple-touch-icon-57x57.png" />
     <link rel="apple-touch-icon-precomposed" sizes="114x114" href="images/apple-touch-icon-114x114.png" />
@@ -31,9 +31,9 @@
     <meta name="msapplication-square310x310logo" content="images/mstile-310x310.png" />
 
     <meta name="twitter:title" content="golova.dev">
-    <meta name="twitter:description" content="Interactive lattice gas web toy.">
+    <meta name="twitter:description" content="Gasomaton \n Interactive lattice gas toy.">
     <meta name="twitter:site" content="@nsgolova">
-    <meta name="twitter:image" content="https://www.golova.dev/experiments/images/preview.png">
+    <meta name="twitter:image" content="https://www.golova.dev/automata/images/preview2.png">
     <meta name="twitter:image:alt" content="Gasomaton">
     <meta name="twitter:card" content="summary">
 
@@ -88,13 +88,26 @@
         <div class="tabrow-tab tabrow-tab-opened-accented" id="selectShape0" title="Circle" style="line-height: 35px; display: block; background-image: url('./images/circle.png'); background-size: 28px;"></div>
         <div class="tabrow-tab" id="selectShape1" title="Square" style="line-height: 35px; display: block; background-image: url('./images/square.png'); background-size: 28px;"></div>
       </div>
-      <div><label id="toolSizeLabel" title="Or Shift+Wheel">Brush size: 2</label></div>
-      <div><input type="range" id="toolSize" min="1" max="1000" value="2" step="1"></div>
+      <div>
+        <label id="toolSizeLabel" title="Or Shift+Wheel">Brush size: </label>
+        <input type="text" id="toolSizeInput" name="fname" value="50" maxlength="4" size="1">
+      </div>
+      <div><input type="range" id="toolSize" min="1" max="1000" value="50" step="1"></div>
+
       <div class="menuTitle">Settings</div>
-      <div><label id="speedLabel">Speed: 25step</label></div>
+      <div>
+        <label id="speedLabel">Speed: </label>
+        <input type="text" id="speedInput" name="fname" value="25" maxlength="3" size="1">
+        <label id="speedLabel">step</label>
+      </div>
       <div><input type="range" id="speed" min="1" max="200" value="25"></div>
-      <div><label id="resolutionLabel">Details: 1x</label></div>
-      <div><input type="range" id="resolution" min="1" max="115" value="1"></div>
+      
+      <div>
+        <label id="resolutionLabel">Details: </label>
+        <input type="text" id="resolutionInput" name="fname" value="10" maxlength="3" size="1">
+        <label id="resolutionLabel">x</label>
+      </div>
+      <div><input type="range" id="resolution" min="1" max="115" value="10"></div>
       </div>
     </div>
     </div>
