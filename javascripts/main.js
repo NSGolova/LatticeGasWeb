@@ -1,7 +1,6 @@
-
 // Canvas size
 var resolution;
-// Copy texture size
+// Drawing texture size
 var viewsize;
 // State texture size
 var statesize;
@@ -10,7 +9,6 @@ var sizeMultiply = 10.0;
 
 var zoom = 0.1;
 var camera = [0., 0.];
-var fps;
 
 const OperationType = {
   collision: 0,
@@ -71,6 +69,7 @@ var buffers, programs, framebuffers, textures;
 var curDrag, prevDrag;
 var cameraDest = [0., 0.];
 
+var fps;
 var fpsLabel;
 
 main();
@@ -113,8 +112,8 @@ function setupWebGL() {
 
 function setupShaderStructs() {
   programs = {
-    copy: initShaderProgram(gl, quadShader, copyShader),
-    col: initShaderProgram(gl, quadShader, collisionShader)
+    copy: initShaderProgram(gl, quadShader, drawingShader),
+    col: initShaderProgram(gl, quadShader, computationShader)
   };
 
   programVars = {
@@ -621,7 +620,7 @@ function initBuffers(gl) {
 function drawScene(pprogramVar) {
   const buffers = initBuffers(gl);
 
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  // gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   {
     const numComponents = 2;
     const type = gl.FLOAT;
