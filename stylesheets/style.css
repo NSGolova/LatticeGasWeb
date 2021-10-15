@@ -3,40 +3,39 @@ body {
   font: 14px "Lucida Grande", Helvetica, Arial, sans-serif;
 }
 
-#rulebookContainer {
+#uiContainer {
     position: absolute;
-    top: 530px;
+    top: 50px;
     left: 10px;
     z-index: 3;
+}
+
+#rulebookContainer {
+    display: table;
     color: gray;
     background-color: rgba(255,255,255,0.9);
     border-radius: 10px;
+
     padding: 10px;
-    z-index: 2;
+    margin-top: 10px;
 }
 
 #setupContainer {
-    position: absolute;
-    top: 360px;
-    left: 10px;
-    z-index: 3;
+    display: table;
     color: gray;
     background-color: rgba(255,255,255,0.9);
     border-radius: 10px;
     padding: 10px;
-    z-index: 2;
+    margin-top: 10px;
 }
 
 #toolsContainer {
-    position: absolute;
-    top: 60px;
-    left: 10px;
-    z-index: 3;
+    display: table;
     color: gray;
     background-color: rgba(255,255,255,0.9);
     border-radius: 10px;
     padding: 10px;
-    z-index: 2;
+    margin-top: 10px;
 }
 
 .linkContainer {

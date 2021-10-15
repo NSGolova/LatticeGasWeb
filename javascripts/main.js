@@ -32,6 +32,7 @@ const ToolType = {
   fan: 0,
   wall: 1,
   nothing: 2,
+  applyImage: 3,
   clear: 128
 };
 
@@ -41,6 +42,7 @@ var tool = ToolType.fan;
 var secondaryTool = ToolType.clear;
 var toolRadius = 25; // 0.5 of shown
 var toolPosition;
+var imageToolTreshold = 520;
 
 const ToolMode = {
   main: 0,
@@ -71,6 +73,9 @@ var cameraDest = [0., 0.];
 
 var fps;
 var fpsLabel;
+
+var recording = false;
+var gif;
 
 main();
 
@@ -136,7 +141,9 @@ function setupShaderStructs() {
       shape: gl.getUniformLocation(programs.col, 'shape'),
       toolInUse: gl.getUniformLocation(programs.col, 'toolInUse'),
       operation: gl.getUniformLocation(programs.col, 'operation'),
-      imageToApply: gl.getUniformLocation(programs.col, 'imageToApply')
+      imageToApply: gl.getUniformLocation(programs.col, 'imageToApply'),
+      selectedTool: gl.getUniformLocation(programs.col, 'selectedTool'),
+      applyImageTreshold: gl.getUniformLocation(programs.col, 'applyImageTreshold')
     }
   }
 
@@ -321,16 +328,11 @@ function createImageFromTexture(texture, width, height) {
     canvas.width = width;
     canvas.height = height;
 
-    // var canvas = document.querySelector('#placeholder');
     var context = canvas.getContext('2d');
-
-    // Copy the pixels to a 2D canvas
     var imageData = context.createImageData(width, height);
     imageData.data.set(data);
     context.putImageData(imageData, 0, 0);
 
-    // var img = new Image();
-    // img.src = ;
     return canvas.toDataURL("image/png").replace(/^data:image\/[^;]/, 'data:application/octet-stream');
 }
 
@@ -353,7 +355,6 @@ function rgbaDataWithImage(image) {
   canvas.width = image.width;
   canvas.height = image.height;
 
-  // var canvas = document.querySelector('#placeholder');
   var context = canvas.getContext('2d');
   context.drawImage(image, 0, 0);
 
@@ -384,7 +385,7 @@ function load() {
   loadFile(createTextureFromImage);
 }
 
-function applyImage() {
+function loadImageToApply() {
   loadFile(function (image) {
 
     const uiData = rgbaDataWithImage(image);
@@ -394,9 +395,6 @@ function applyImage() {
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, image.width, image.height,
                         0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, uiData);
-
-    stepApplyImage();
-    textures.apply = null;
   })
 }
 
@@ -454,10 +452,6 @@ function stepClear() {
   stepProgram(programs.col, programVars.col, OperationType.clear);
 }
 
-function stepApplyImage() {
-  stepProgram(programs.col, programVars.col, OperationType.applyImage);
-}
-
 function step() {
   stepProgram(programs.col, programVars.col, OperationType.collision);
 }
@@ -483,6 +477,7 @@ function stepProgram(program, vars, operation, oldSize) {
 
   if (textures.apply) {
     gl.uniform1i(vars.imageToApply, 1);
+    gl.uniform1ui(vars.applyImageTreshold, imageToolTreshold);
   }
 
   gl.uniform1i(vars.state, 0);
@@ -492,6 +487,7 @@ function stepProgram(program, vars, operation, oldSize) {
   if (toolPosition) {
     gl.uniform3f(vars.tool, toolPosition.x, toolPosition.y, toolRadius);
     gl.uniform1i(vars.shape, shape);
+    gl.uniform1i(vars.selectedTool, tool);
     switch (toolInUse) {
       case ToolMode.none:
         gl.uniform1i(vars.toolInUse, ToolType.nothing);
@@ -949,9 +945,19 @@ function setupEventHandlers() {
     load();
   });
 
-  var applyButton = document.querySelector('#applyImage');
-  applyButton.addEventListener('pointerdown', function() {
-    applyImage();
+  var recordButton = document.querySelector('#recordGif');
+  recordButton.addEventListener('pointerdown', function() {
+    if (recording) {
+      recordButton.value = "Record video ";
+      recordButton.style.backgroundColor = "";
+      recordButton.style.color = "";
+      stopRecordingGif();
+    } else {
+      recordButton.value = "Stop recording";
+      recordButton.style.backgroundColor = "red";
+      recordButton.style.color = "white";
+      recordGif();
+    }
   });
 
   var uiContainer = document.querySelector('#uiContainer');
@@ -972,6 +978,35 @@ function setupEventHandlers() {
   }
 }
 
+function appendTresholdInput() {
+  const div = document.createElement('div');
+  div.id = 'imageToolTreshold';
+  div.innerHTML = `<div>
+    <label id="tresholdLabel" title="Or Shift+Wheel">Treshold: </label>
+    <input type="text" id="tresholdInput" name="fname" value="520" maxlength="3" size="1">
+  </div>
+  <div><input type="range" id="treshold" min="1" max="1000" value="520" step="1"></div>`;
+  document.getElementById('toolOptionsContainer').appendChild(div);
+
+  var tresholdLabel = document.querySelector('#treshold');
+  var tresholdInput = document.querySelector('#tresholdInput');
+  tresholdLabel.addEventListener('input', function() {
+    tresholdInput.value = "" + this.value;
+    imageToolTreshold = this.value;
+  });
+  tresholdInput.addEventListener('input', function() {
+    tresholdLabel.value = this.value;
+    imageToolTreshold = this.value;
+  });
+  tresholdLabel.value = imageToolTreshold;
+  tresholdInput.value = "" + imageToolTreshold;
+}
+
+function removeTresholdInput() {
+  document.getElementById('toolOptionsContainer').removeChild(document.getElementById('imageToolTreshold'));
+}
+
+// TOFO: Move to classes.
 var g_setPresetElements;
 var g_selectToolElements;
 var g_selectShapeElements;
@@ -987,6 +1022,28 @@ function selectTool(elem, id) {
     g_selectToolElements[i].className = i == id ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
   }
   tool = id == 2 ? 128 : id;
+
+  var optionsTitle = document.querySelector('#toolOptionsTitle');
+  var option0 = document.querySelector('#selectShape0');
+  var option1 = document.querySelector('#selectShape1');
+  if (tool == ToolType.applyImage && !textures.apply) {
+    loadImageToApply();
+    optionsTitle.innerHTML = "How to apply"
+    option0.style.backgroundImage = "url('./images/normal-image.png')"
+    option1.style.backgroundImage = "url('./images/negative-image.png')"
+    option1.style.backgroundColor = "black"
+
+    appendTresholdInput()
+
+  } else {
+    textures.apply = null;
+    optionsTitle.innerHTML = "Shape"
+    option0.style.backgroundImage = "url('./images/circle.png')"
+    option1.style.backgroundImage = "url('./images/square.png')"
+    option1.style.backgroundColor = ""
+
+    removeTresholdInput()
+  }
 }
 function selectShape(elem, id) {
   for (var i = 0; i < g_selectShapeElements.length; ++i) {
@@ -1103,4 +1160,20 @@ function applyDrag() {
   prevDrag = curDrag;
 
   redraw();
+}
+
+function recordGif() {
+  recording = true;
+
+  const canvas = document.querySelector('#glcanvas');
+  gif = new CanvasRecorder(canvas);
+  gif.start();
+}
+
+function stopRecordingGif() {
+  recording = false;
+
+  gif.stop();
+  gif.save('Gasomaton.webm');
+  gif = null;
 }

@@ -11,13 +11,17 @@ const computationShader = `#version 300 es
   uniform vec3 tool;
   uniform int shape;
   uniform int operation;
+
+  uniform int selectedTool;
   uniform int toolInUse;
+  uniform uint applyImageTreshold;
+
   out uvec4 fragColor;
 
   const uint Nothing = 0u, E=1u, SE=2u, SW=4u, W=8u, NW=16u, NE=32u, REST=64u, BOUNDARY=128u;
   const int collision = 0, initializeRandom = 1, initializeWind = 2, resize = 3, clear = 4, applyImage = 5;
   const int circleShape = 0, squareShape = 1;
-  const int fanTool = 0, wallTool = 1, nothingTool = 2, clearTool = 128;
+  const int fanTool = 0, wallTool = 1, nothingTool = 2, imageTool = 3, clearTool = 128;
 
   // square root of 3 over 2
   const float hex_factor = 0.8660254037844386;
@@ -150,20 +154,41 @@ const computationShader = `#version 300 es
   }
 
   bool pointIsInTool(vec2 pos) {
-    switch (shape) {
-      case circleShape:
-        // checking the equation of
-        // ellipse with the given point
-        float p = (pow((pos.x - tool.y), 2.0) / pow(tool.z * hex_factor, 2.0))
-              + (pow((pos.y - tool.x), 2.0) / pow(tool.z, 2.0));
-        return p <= 1.0;
-        break;
-      case squareShape:
+    if (selectedTool == imageTool) {
+      vec2 origin = vec2(pos.y,  - pos.x);
 
-        bool xx = (pos.x >= tool.y - tool.z * hex_factor) && (pos.x < tool.y + tool.z * hex_factor);
-        bool yy = (pos.y >= tool.x - tool.z) && (pos.y < tool.x + tool.z);
-        return xx && yy;
-        break;
+      origin.x -= tool.x;
+      origin.y += tool.y;
+      origin.x *= hex_factor;
+
+      origin /= (tool.z / 20.0);
+
+      uvec4 imageData = texelFetch(imageToApply, ivec2(origin), 0);
+      uint sum = imageData.x + imageData.y + imageData.z;
+      switch (shape) {
+        case circleShape:
+          return sum > applyImageTreshold;
+          break;
+        case squareShape:
+          return sum < applyImageTreshold && sum != 0u;
+          break;
+      }
+    } else {
+      switch (shape) {
+        case circleShape:
+          // checking the equation of
+          // ellipse with the given point
+          float p = (pow((pos.x - tool.y), 2.0) / pow(tool.z * hex_factor, 2.0))
+                + (pow((pos.y - tool.x), 2.0) / pow(tool.z, 2.0));
+          return p <= 1.0;
+          break;
+        case squareShape:
+
+          bool xx = (pos.x >= tool.y - tool.z * hex_factor) && (pos.x < tool.y + tool.z * hex_factor);
+          bool yy = (pos.y >= tool.x - tool.z) && (pos.y < tool.x + tool.z);
+          return xx && yy;
+          break;
+      }
     }
   }
 
@@ -179,6 +204,7 @@ const computationShader = `#version 300 es
     if (pointIsInTool(pos)) {
       switch (tool) {
         case wallTool:
+        case imageTool:
           data.x = BOUNDARY;
           break;
         case clearTool:
@@ -190,16 +216,6 @@ const computationShader = `#version 300 es
       }
     }
     data.y = 0u;
-  }
-
-  void calculateApplyImage(inout uvec4 data, ivec2 position) {
-    uvec4 imageData = texelFetch(imageToApply, ivec2(position.y, int(scale.x) - position.x), 0);
-    uint sum = imageData.x + imageData.y + imageData.z;
-    if (sum > 550u || sum == 0u) {
-      data.x = BOUNDARY;
-    } else {
-      data.x = sum / 6u;
-    }
   }
 
   void main() {
@@ -223,9 +239,6 @@ const computationShader = `#version 300 es
         break;
       case resize:
         calculateResize(data, position);
-        break;
-      case applyImage:
-        calculateApplyImage(data, position);
         break;
     }
 
