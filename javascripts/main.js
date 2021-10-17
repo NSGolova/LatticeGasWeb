@@ -16,7 +16,8 @@ const OperationType = {
   initializeWind: 2,
   resize: 3,
   clear: 4,
-  applyImage: 5
+  applyImage: 5,
+  nothing: 128
 };
 var preset = OperationType.initializeWind;
 
@@ -191,6 +192,18 @@ function resize() {
   step();
   redraw();
   start();
+}
+
+function resizeView() {
+  const canvas = document.querySelector('#glcanvas');
+  const placeholder = document.querySelector('#placeholder');
+
+  resolution = [placeholder.getBoundingClientRect().width, placeholder.getBoundingClientRect().height];
+
+  canvas.width = resolution[0];
+  canvas.height = resolution[1];
+
+  viewsize = new Float32Array([(Math.pow(2, baseLog(2, resolution[0]) + 1) * sizeMultiply) | 0, (Math.pow(2, baseLog(2, resolution[0]) + 1) * sizeMultiply) | 0]);
 }
 
 function recalculateTextures() {
@@ -434,6 +447,7 @@ function swap() {
 
 function updatePreset() {
   stepProgram(programs.col, programVars.col, preset);
+  redraw();
 }
 
 function stepResize(oldSize) {
@@ -450,6 +464,10 @@ function stepWind() {
 
 function stepClear() {
   stepProgram(programs.col, programVars.col, OperationType.clear);
+}
+
+function stepNothing() {
+  stepProgram(programs.col, programVars.col, OperationType.nothing);
 }
 
 function step() {
@@ -805,7 +823,7 @@ function setupEventHandlers() {
         pause();
       }
     }
-    if (isFinite(event.key) && event.target == document.body) {
+    if (isFinite(event.key) && event.key != ' ' && event.target == document.body) {
       selectTool(null, parseInt(event.key) - 1);
     }
   })
@@ -819,6 +837,11 @@ function setupEventHandlers() {
       toolRadius += zoomAmount * (toolRadius / 20.0);
       document.getElementById("toolSizeInput").value = "" + Math.round(toolRadius * 2);
       toolSizeLabel.value = toolRadius * 2;
+
+      if (paused) {
+        stepNothing();
+        redraw();
+      }
     } else {
       const cameraFp = ScreenToPt(e.pageX, e.pageY);
 
@@ -858,11 +881,19 @@ function setupEventHandlers() {
         rightPressed = true;
 
         toolInUse = ToolMode.secondary;
+        if (paused) {
+          stepNothing();
+          redraw();
+        }
       }
       if (!dragging && e.button == 0) {
         leftPressed = true;
 
         toolInUse = ToolMode.main;
+        if (paused) {
+          stepNothing();
+          redraw();
+        }
       }
   });
 
@@ -871,7 +902,10 @@ function setupEventHandlers() {
       return;
     }
     toolPosition = ScreenToState(e.offsetX, e.offsetY);
-    redraw();
+    if (paused) {
+      stepNothing();
+      redraw();
+    }
     curDrag = [e.offsetX, e.offsetY];
     if (dragging) {
       applyDrag();
@@ -907,11 +941,18 @@ function setupEventHandlers() {
   toolSizeLabel.addEventListener('input', function() {
     toolSizeInput.value = "" + this.value;
     toolRadius = this.value / 2;
+    if (paused) {
+      stepNothing();
+      redraw();
+    }
   });
   toolSizeInput.addEventListener('input', function() {
-
     toolRadius = this.value / 2;
     toolSizeLabel.value = toolRadius * 2;
+    if (paused) {
+      stepNothing();
+      redraw();
+    }
   });
   toolSizeLabel.value = toolRadius * 2;
   toolSizeInput.value = "" + toolRadius * 2;
@@ -932,7 +973,7 @@ function setupEventHandlers() {
   resolutionInput.value = "" + sizeMultiply;
 
   window.addEventListener('resize', function() {
-    // resize();
+    resizeView();
   });
 
   var saveButton = document.querySelector('#save');
@@ -993,17 +1034,28 @@ function appendTresholdInput() {
   tresholdLabel.addEventListener('input', function() {
     tresholdInput.value = "" + this.value;
     imageToolTreshold = this.value;
+    if (paused) {
+      stepNothing();
+      redraw();
+    }
   });
   tresholdInput.addEventListener('input', function() {
     tresholdLabel.value = this.value;
     imageToolTreshold = this.value;
+    if (paused) {
+      stepNothing();
+      redraw();
+    }
   });
   tresholdLabel.value = imageToolTreshold;
   tresholdInput.value = "" + imageToolTreshold;
 }
 
 function removeTresholdInput() {
-  document.getElementById('toolOptionsContainer').removeChild(document.getElementById('imageToolTreshold'));
+  const imageToolTreshold = document.getElementById('imageToolTreshold');
+  if (imageToolTreshold) {
+    document.getElementById('toolOptionsContainer').removeChild(imageToolTreshold);
+  }
 }
 
 // TOFO: Move to classes.
@@ -1030,8 +1082,11 @@ function selectTool(elem, id) {
     loadImageToApply();
     optionsTitle.innerHTML = "How to apply"
     option0.style.backgroundImage = "url('./images/normal-image.png')"
+    option0.title = "Normal image";
+
     option1.style.backgroundImage = "url('./images/negative-image.png')"
     option1.style.backgroundColor = "black"
+    option1.title = "Negative image";
 
     appendTresholdInput()
 
@@ -1039,8 +1094,11 @@ function selectTool(elem, id) {
     textures.apply = null;
     optionsTitle.innerHTML = "Shape"
     option0.style.backgroundImage = "url('./images/circle.png')"
+    option0.title = "Circle";
+
     option1.style.backgroundImage = "url('./images/square.png')"
     option1.style.backgroundColor = ""
+    option0.title = "Square";
 
     removeTresholdInput()
   }
@@ -1050,7 +1108,10 @@ function selectShape(elem, id) {
     g_selectShapeElements[i].className = i == id ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
   }
   shape = id;
-  redraw();
+  if (paused) {
+    stepNothing();
+    redraw();
+  }
 }
 
 function setupButtons() {
