@@ -7,6 +7,9 @@ var statesize;
 // Copy texture resolution multiplicator.
 var sizeMultiply = 10.0;
 
+var showVelocity = false;
+var velocityScale = 25;
+
 var zoom = 0.1;
 var camera = [0., 0.];
 
@@ -36,11 +39,11 @@ const ToolType = {
   applyImage: 3,
   clear: 128
 };
-
 // Tool for the left mouse button.
 var tool = ToolType.fan;
 // Tool for the right mouse button.
 var secondaryTool = ToolType.clear;
+
 var toolRadius = 25; // 0.5 of shown
 var toolPosition;
 var imageToolTreshold = 520;
@@ -64,7 +67,6 @@ var speed = 25;
 var timers = [];
 
 var rulebookController;
-const directionCircle = [NW, SW, W, SE, NE, E];
 var selectedBook;
 
 var gl, gl2Available = false;
@@ -77,6 +79,10 @@ var fpsLabel;
 
 var recording = false;
 var gif;
+
+var speedSlider, resolutionSlider;
+var tresholdSlider, toolSizeSlider;
+var showVelocityToggle, velocitySlider;
 
 main();
 
@@ -114,23 +120,29 @@ function setupWebGL() {
     alert(text);
     return;
   }
+
+  gl.getExtension('EXT_color_buffer_float');
 }
 
 function setupShaderStructs() {
   programs = {
     copy: initShaderProgram(gl, quadShader, drawingShader),
-    col: initShaderProgram(gl, quadShader, computationShader)
+    col: initShaderProgram(gl, quadShader, computationShader),
+    velocity: initShaderProgram(gl, quadShader, velocityShader)
   };
 
   programVars = {
     copy: {
       quad: gl.getAttribLocation(programs.copy, 'quad'),
       state: gl.getUniformLocation(programs.copy, 'state'),
+      velocityMap: gl.getUniformLocation(programs.copy, 'velocityMap'),
       size: gl.getUniformLocation(programs.copy, 'size'),
       scale: gl.getUniformLocation(programs.copy, 'scale'),
+      velocityScale: gl.getUniformLocation(programs.copy, 'velocityScale'),
       camera: gl.getUniformLocation(programs.copy, 'camera'),
       zoom: gl.getUniformLocation(programs.copy, 'zoom'),
-      resolution: gl.getUniformLocation(programs.copy, 'resolution')
+      resolution: gl.getUniformLocation(programs.copy, 'resolution'),
+      showVelocity: gl.getUniformLocation(programs.copy, 'showVelocity')
     },
     col: {
       quad: gl.getAttribLocation(programs.col, 'quad'),
@@ -145,6 +157,11 @@ function setupShaderStructs() {
       imageToApply: gl.getUniformLocation(programs.col, 'imageToApply'),
       selectedTool: gl.getUniformLocation(programs.col, 'selectedTool'),
       applyImageTreshold: gl.getUniformLocation(programs.col, 'applyImageTreshold')
+    },
+    velocity: {
+      quad: gl.getAttribLocation(programs.velocity, 'quad'),
+      state: gl.getUniformLocation(programs.velocity, 'state'),
+      scale: gl.getUniformLocation(programs.velocity, 'scale')
     }
   }
 
@@ -153,7 +170,8 @@ function setupShaderStructs() {
   };
 
   framebuffers = {
-      step: gl.createFramebuffer()
+      step: gl.createFramebuffer(),
+      hui: gl.createFramebuffer()
   };
 }
 
@@ -222,9 +240,19 @@ function recalculateTextures() {
       front: createTexture(gl.REPEAT, gl.NEAREST),
       back: createTexture(gl.REPEAT, gl.NEAREST)
   };
+
+  recalculateVelocityTexture();
 }
 
-function createTexture(wrap, filter, size) {
+function recalculateVelocityTexture() {
+  if (showVelocity) {
+    textures.velocityMap = createTexture(gl.REPEAT, gl.NEAREST, [statesize[0] / velocityScale, statesize[1] / velocityScale], true);
+  } else {
+    textures.velocityMap = null;
+  }
+}
+
+function createTexture(wrap, filter, size, isFloat) {
     var texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
     wrap = wrap == null ? gl.CLAMP_TO_EDGE : wrap;
@@ -235,12 +263,23 @@ function createTexture(wrap, filter, size) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
 
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    if (size) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, size[0], size[1],
-                        0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, null);
+
+    if (isFloat) {
+      if (size) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, size[0], size[1],
+                          0, gl.RGBA, gl.HALF_FLOAT, null);
+      } else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, statesize[0], statesize[1],
+                          0, gl.RGBA, gl.HALF_FLOAT, null);
+      }
     } else {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, statesize[0], statesize[1],
-                        0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, null);
+      if (size) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, size[0], size[1],
+                          0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, null);
+      } else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, statesize[0], statesize[1],
+                          0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, null);
+      }
     }
 
     return texture;
@@ -380,6 +419,8 @@ function createTextureFromImage(image) {
       front: createTexture(gl.REPEAT, gl.NEAREST),
       back: createTexture(gl.REPEAT, gl.NEAREST)
   };
+
+  recalculateVelocityTexture();
 
   const uiData = rgbaDataWithImage(image);
   var imgData = new Uint8Array(uiData);
@@ -528,22 +569,30 @@ function stepProgram(program, vars, operation, oldSize) {
 }
 
 function redraw() {
-  // createImageFromTexture(textures.front, statesize[0], statesize[1] * 8);
-
+  if (showVelocity) {
+    calculateVelocities();
+  }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
   const program = programs.copy;
 
-  gl.activeTexture(gl.TEXTURE0 + 0);
+  gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, textures.front);
+
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, textures.velocityMap);
 
   gl.viewport(0, 0, viewsize[0], viewsize[1]);
 
   gl.useProgram(program);
 
   gl.uniform1i(programVars.copy.state, 0);
+  gl.uniform1i(programVars.copy.velocityMap, 1);
+
   gl.uniform2f(programVars.copy.camera, camera[0], camera[1]);
   gl.uniform1f(programVars.copy.zoom, zoom);
+  gl.uniform1i(programVars.copy.showVelocity, showVelocity ? 1 : 0);
+  gl.uniform1f(programVars.copy.velocityScale, velocityScale);
 
   drawScene(programVars.copy.quad);
   gl.uniform2f(programVars.copy.scale, viewsize[0], viewsize[1]);
@@ -553,6 +602,29 @@ function redraw() {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
   fpsLabel.innerHTML = "fps: " + fps;
+}
+
+function calculateVelocities() {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.hui);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+                          gl.TEXTURE_2D, textures.velocityMap, 0);
+
+  const program = programs.velocity;
+  const vars = programVars.velocity;
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, textures.front);
+
+  gl.viewport(0, 0, statesize[0] / velocityScale, statesize[1] / velocityScale);
+
+  gl.useProgram(program);
+
+  drawScene(vars.quad);
+
+  gl.uniform1i(vars.state, 0);
+  gl.uniform1f(vars.scale, velocityScale);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
 function start() {
@@ -716,6 +788,8 @@ function setupEventHandlers() {
   // Whether a gesture is currently running.
   var gesturing = false;
 
+  setupSliders();
+
   function touchDistance(touchA, touchB) {
     return Math.sqrt(
       (touchA.pageX - touchB.pageX) ** 2 + (touchA.pageY - touchB.pageY) ** 2,
@@ -826,6 +900,7 @@ function setupEventHandlers() {
     if (isFinite(event.key) && event.key != ' ' && event.target == document.body) {
       selectTool(null, parseInt(event.key) - 1);
     }
+
   })
 
   canvas.addEventListener("wheel", e => {
@@ -835,13 +910,7 @@ function setupEventHandlers() {
 
     if (e.shiftKey) {
       toolRadius += zoomAmount * (toolRadius / 20.0);
-      document.getElementById("toolSizeInput").value = "" + Math.round(toolRadius * 2);
-      toolSizeLabel.value = toolRadius * 2;
-
-      if (paused) {
-        stepNothing();
-        redraw();
-      }
+      toolSizeSlider.setValue(Math.round(toolRadius * 2));
     } else {
       const cameraFp = ScreenToPt(e.pageX, e.pageY);
 
@@ -921,57 +990,6 @@ function setupEventHandlers() {
     toolInUse = ToolMode.none;
   });
 
-  var speedLabel = document.querySelector('#speed');
-  var speedInput = document.querySelector('#speedInput');
-  speedInput.addEventListener('input', function() {
-    speed = this.value;
-    speedLabel.value = speed;
-    start();
-  });
-  speedLabel.addEventListener('input', function() {
-    speedInput.value = "" + this.value;
-    speed = this.value;
-    start();
-  });
-  speedLabel.value = speed;
-  speedInput.value = "" + speed;
-
-  var toolSizeLabel = document.querySelector('#toolSize');
-  var toolSizeInput = document.querySelector('#toolSizeInput');
-  toolSizeLabel.addEventListener('input', function() {
-    toolSizeInput.value = "" + this.value;
-    toolRadius = this.value / 2;
-    if (paused) {
-      stepNothing();
-      redraw();
-    }
-  });
-  toolSizeInput.addEventListener('input', function() {
-    toolRadius = this.value / 2;
-    toolSizeLabel.value = toolRadius * 2;
-    if (paused) {
-      stepNothing();
-      redraw();
-    }
-  });
-  toolSizeLabel.value = toolRadius * 2;
-  toolSizeInput.value = "" + toolRadius * 2;
-
-  var resolutionLabel = document.querySelector('#resolution');
-  var resolutionInput = document.querySelector('#resolutionInput');
-  resolutionLabel.addEventListener('input', function() {
-    resolutionInput.value = "" + this.value;
-    sizeMultiply = this.value;
-    resize();
-  });
-  resolutionInput.addEventListener('input', function() {
-    resolutionLabel.value = this.value;
-    sizeMultiply = this.value;
-    resize();
-  });
-  resolutionLabel.value = sizeMultiply;
-  resolutionInput.value = "" + sizeMultiply;
-
   window.addEventListener('resize', function() {
     resizeView();
   });
@@ -1019,43 +1037,72 @@ function setupEventHandlers() {
   }
 }
 
-function appendTresholdInput() {
-  const div = document.createElement('div');
-  div.id = 'imageToolTreshold';
-  div.innerHTML = `<div>
-    <label id="tresholdLabel" title="Or Shift+Wheel">Treshold: </label>
-    <input type="text" id="tresholdInput" name="fname" value="520" maxlength="3" size="1">
-  </div>
-  <div><input type="range" id="treshold" min="1" max="1000" value="520" step="1"></div>`;
-  document.getElementById('toolOptionsContainer').appendChild(div);
+function setupSliders() {
+  speedSlider = new SliderInput(
+    "settingsContainer",
+    "Speed",
+    "How fast simulation is calculated.", 1, speed, 200,
+    function (slider) {
+      speed = slider.value;
+      if (!paused) {
+        start();
+      }
+    }, "step");
 
-  var tresholdLabel = document.querySelector('#treshold');
-  var tresholdInput = document.querySelector('#tresholdInput');
-  tresholdLabel.addEventListener('input', function() {
-    tresholdInput.value = "" + this.value;
-    imageToolTreshold = this.value;
-    if (paused) {
-      stepNothing();
-      redraw();
-    }
-  });
-  tresholdInput.addEventListener('input', function() {
-    tresholdLabel.value = this.value;
-    imageToolTreshold = this.value;
-    if (paused) {
-      stepNothing();
-      redraw();
-    }
-  });
-  tresholdLabel.value = imageToolTreshold;
-  tresholdInput.value = "" + imageToolTreshold;
-}
+  resolutionSlider = new SliderInput(
+    "settingsContainer",
+    "Details",
+    "Simulation grid size multiplicator.", 1, sizeMultiply, 115,
+    function (slider) {
+      sizeMultiply = slider.value;
+      resize();
+    }, "X");
 
-function removeTresholdInput() {
-  const imageToolTreshold = document.getElementById('imageToolTreshold');
-  if (imageToolTreshold) {
-    document.getElementById('toolOptionsContainer').removeChild(imageToolTreshold);
-  }
+    showVelocityToggle = new ToggleInput(
+      "settingsContainer",
+      "Show velocity",
+      "Show velocity arrows grid",
+      showVelocity,
+    function(toggle) {
+      showVelocity = toggle.checked;
+      velocitySlider.hidden = !showVelocity;
+      recalculateVelocityTexture();
+      redraw();
+    });
+
+  velocitySlider = new SliderInput(
+    "settingsContainer",
+    "Arrow length",
+    "Simulation grid size multiplicator.", 1, velocityScale, 1000,
+    function (slider) {
+      velocityScale = slider.value;
+      recalculateVelocityTexture();
+      redraw();
+    }, null, !showVelocity);
+
+  toolSizeSlider = new SliderInput(
+    "toolOptionsContainer",
+    "Brush size",
+    "Or Shift+Wheel", 1, toolRadius * 2, 1000,
+    function (slider) {
+      toolRadius = slider.value / 2;
+      if (paused) {
+        stepNothing();
+        redraw();
+      }
+    }, "X");
+
+  tresholdSlider = new SliderInput(
+    "toolOptionsContainer",
+    "Treshold",
+    "How dark pixels should be for a wall.", 1, imageToolTreshold, 1000,
+    function (slider) {
+      imageToolTreshold = slider.value;
+      if (paused) {
+        stepNothing();
+        redraw();
+      }
+    }, null, true);
 }
 
 // TOFO: Move to classes.
@@ -1088,7 +1135,7 @@ function selectTool(elem, id) {
     option1.style.backgroundColor = "black"
     option1.title = "Negative image";
 
-    appendTresholdInput()
+    tresholdSlider.show()
 
   } else {
     textures.apply = null;
@@ -1100,7 +1147,7 @@ function selectTool(elem, id) {
     option1.style.backgroundColor = ""
     option0.title = "Square";
 
-    removeTresholdInput()
+    tresholdSlider.hide()
   }
 }
 function selectShape(elem, id) {
@@ -1115,7 +1162,6 @@ function selectShape(elem, id) {
 }
 
 function setupButtons() {
-
   g_selectToolElements = [];
   for (var ii = 0; ii < 100; ++ii) {
     var elem = document.getElementById("selectTool" + ii);

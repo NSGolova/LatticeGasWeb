@@ -195,3 +195,12 @@ input:checked + .slider:before {
 .slider.round:before {
   border-radius: 50%;
 }
+
+.btn {
+  border: none;
+  height: 28px;
+  width: 28px;
+  background-color: transparent; /* White text */
+  cursor: pointer; /* Mouse pointer on hover */
+  background-size: 28px;
+}

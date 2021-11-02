@@ -174,43 +174,45 @@ class RuleBookUIController {
     return max;
 }
 
-createToggle(id, title, description, checked, eventListener) {
-
-  let toggleButton = document.createElement('div');
-  toggleButton.className = "toggleButton";
-  toggleButton.title = description;
-  toggleButton.style.display = "inline";
-  let switchLabel = document.createElement('label');
-  switchLabel.className = "switch";
-  toggleButton.append(switchLabel);
-
-  let toggleLabel = document.createElement('label');
-  toggleLabel.className = "toggleButtonLabel";
-  toggleLabel.innerText = title;
-  toggleButton.append(toggleLabel);
-
-  let checkbox = document.createElement('input');
-  checkbox.type = "checkbox";
-  checkbox.id = id;
-  checkbox.checked = checked;
-  checkbox.addEventListener('input', eventListener);
-  switchLabel.append(checkbox);
-
-  let slider = document.createElement('span');
-  slider.className = "slider round";
-  switchLabel.append(slider);
-
-  return toggleButton;
-}
-
     appendRule(rule) {
       const table = document.querySelector('.rulebookTable') // Find the table we created
       let tableBodyRow = document.createElement('tr') // Create the current table row
       tableBodyRow.className = 'tableBodyRow'
-      // Lines 72-85 create the 5 column cells that will be appended to the current table row
 
-      let nameData = document.createElement('td')
-      nameData.innerHTML = "<b>" + rule.name + "</b>";
+      let nameLabel = document.createElement('tb')
+      nameLabel.innerHTML = "<b>" + rule.name + "</b>";
+      nameLabel.style.display = "inline";
+
+      let nameInput = document.createElement('input');
+      nameInput.type = "text"
+      nameInput.value = rule.name;
+      nameInput.style.display = "none";
+
+      nameInput.addEventListener('input', function() {
+        rule.name = this.value;
+        nameLabel.innerHTML = "<b>" + rule.name + "</b>";
+      });
+
+      // line-height: 35px; display: block; background-image: url('./images/circle.png'); background-size: 28px;
+
+      let redactButton = document.createElement('input');
+      redactButton.type = "button"
+      redactButton.title = "Redact name"
+      redactButton.className = "btn";
+      redactButton.style.backgroundImage = "url('./images/redact.png')"
+      // redactButton.style.lineHeight = 28;
+
+      redactButton.addEventListener('pointerdown', function() {
+        if (nameLabel.style.display == "inline") {
+            nameInput.style.display = "inline"
+            nameLabel.style.display = "none"
+            this.style.backgroundImage = "url('./images/ok.png')"
+        } else {
+          nameInput.style.display = "none"
+          nameLabel.style.display = "inline"
+          this.style.backgroundImage = "url('./images/redact.png')"
+        }
+      });
 
       let copyButton = document.createElement('input')
       copyButton.type = "button"
@@ -231,26 +233,29 @@ createToggle(id, title, description, checked, eventListener) {
         captureThis.deleteRule(rule);
       });
 
-      let enabled = this.createToggle("enabled", "Enabled", "Is this rule take effect.", rule.enabled, function() {
-        rule.enabled = !rule.enabled;
-        captureThis.delegate();
-      });
-      let symmetric = this.createToggle("symmetric", "Symmetric", "Make rule symmetric on 6 axis.", rule.symmetric, function() {
-        rule.symmetric = !rule.symmetric;
-        captureThis.delegate();
-      });
-      let random = this.createToggle("random", "Random", "State transition will be picked randomly.", rule.random, function() {
-        rule.random = !rule.random;
-        captureThis.delegate();
-      });
-
       let tableBodyRow2 = document.createElement('tr') // Create the current table row
       tableBodyRow2.className = 'tableBodyRow'
 
-      tableBodyRow.append(nameData);
+      new ToggleInput(tableBodyRow2, "Enabled", "Is this rule take effect.", rule.enabled, function(toggle) {
+        rule.enabled = toggle.checked;
+        captureThis.delegate();
+      });
+
+      new ToggleInput(tableBodyRow2, "Symmetric", "Make rule symmetric on 6 axis.", rule.symmetric, function(toggle) {
+        rule.symmetric = toggle.checked;
+        captureThis.delegate();
+      });
+
+      new ToggleInput(tableBodyRow2, "Random", "State transition will be picked randomly.", rule.random, function(toggle) {
+        rule.random = toggle.checked;
+        captureThis.delegate();
+      });
+
+
+      tableBodyRow.append(nameInput, nameLabel, redactButton);
       table.append(tableBodyRow);
 
-      tableBodyRow2.append(enabled, symmetric, random, copyButton, deleteButton);
+      tableBodyRow2.append(copyButton, deleteButton);
       table.append(tableBodyRow2);
 
       let tableBodyRow3 = document.createElement('tr') // Create the current table row
