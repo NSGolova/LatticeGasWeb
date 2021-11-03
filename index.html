@@ -7,7 +7,8 @@
               integrity="sha512-zhHQR0/H5SEBL3Wn6yYSaTTZej12z0hVZKOv3TwCUXT1z5qeqGcXJLLrbERYRScEDDpYIJhPC1fk31gqR783iQ=="
               crossorigin="anonymous"></script>
     <meta property="og:image" content="https://www.golova.dev/automata/images/preview2.png">
-    <meta property="og:title" content="Gasomaton \n Interactive lattice gas toy.">
+    <meta property="og:title" content="Gasomaton">
+    <meta property="og:description" content="Interactive lattice gas toy. Turn any image into simulation.">
     <meta property="og:type" content="website">
     <link rel="apple-touch-icon-precomposed" sizes="57x57" href="images/apple-touch-icon-57x57.png" />
     <link rel="apple-touch-icon-precomposed" sizes="114x114" href="images/apple-touch-icon-114x114.png" />
@@ -22,7 +23,7 @@
     <link rel="icon" type="image/png" href="images/favicon-32x32.png" sizes="32x32" />
     <link rel="icon" type="image/png" href="images/favicon-16x16.png" sizes="16x16" />
     <link rel="icon" type="image/png" href="images/favicon-128.png" sizes="128x128" />
-    <meta name="application-name" content="&nbsp;"/>
+    <meta name="application-name" content="Gasomaton"/>
     <meta name="msapplication-TileColor" content="#FFFFFF" />
     <meta name="msapplication-TileImage" content="images/mstile-144x144.png" />
     <meta name="msapplication-square70x70logo" content="images/mstile-70x70.png" />
@@ -30,8 +31,8 @@
     <meta name="msapplication-wide310x150logo" content="images/mstile-310x150.png" />
     <meta name="msapplication-square310x310logo" content="images/mstile-310x310.png" />
 
-    <meta name="twitter:title" content="golova.dev">
-    <meta name="twitter:description" content="Gasomaton \n Interactive lattice gas toy.">
+    <meta name="twitter:title" content="Gasomaton">
+    <meta name="twitter:description" content="Interactive lattice gas toy. Turn any image into simulation.">
     <meta name="twitter:site" content="@nsgolova">
     <meta name="twitter:image" content="https://www.golova.dev/automata/images/preview2.png">
     <meta name="twitter:image:alt" content="Gasomaton">
@@ -46,12 +47,7 @@
     <div id="toolsContainer" onclick="">
       <div id="topUI">
       <div class="menuTitle">Tool</div>
-      <div class="tabrow" style="height: 35px;">
-        <div class="tabrow-tab tabrow-tab-opened-accented" id="selectTool0" title="Particle generator (1)" style="line-height: 35px; display: block; background-image: url('./images/fan.png'); background-size: 28px;"></div>
-        <div class="tabrow-tab" id="selectTool1" title="Inpenetratable wall (2)" style="line-height: 35px; display: block; background-image: url('./images/wall.png'); background-size: 28px;"></div>
-        <div class="tabrow-tab" id="selectTool2" title="Clear (right-click or 3)" style="line-height: 35px; display: block; background-image: url('./images/erase.png'); background-size: 28px;"></div>
-        <div class="tabrow-tab" id="selectTool3" title="Apply image" style="line-height: 35px; display: block; background-image: url('./images/apply-image.png'); background-size: 28px;"></div>
-      </div>
+      <div id="toolTab"></div>
       <div class="menuTitle" id="toolOptionsTitle">Shape</div>
       <div class="tabrow" style="height: 35px;">
         <div class="tabrow-tab tabrow-tab-opened-accented" id="selectShape0" title="Circle" style="line-height: 35px; display: block; background-image: url('./images/circle.png'); background-size: 28px;"></div>
@@ -60,6 +56,7 @@
       <div id="toolOptionsContainer"></div>
       <div class="menuTitle">Settings</div>
       <div id="settingsContainer"></div>
+      <div id="postSettingsContainer"></div>
       </div>
     </div>
     <div id="rulebookContainer" onclick="">
@@ -105,10 +102,11 @@
     <script src="./javascripts/ToolsUI.js"></script>
     <script src="./javascripts/RulesController.js"></script>
     <script src="./javascripts/Rules.js"></script>
-    <script src="./javascripts/quadShader.js"></script>
-    <script src="./javascripts/computationShader.js"></script>
-    <script src="./javascripts/velocityShader.js"></script>
-    <script src="./javascripts/drawingShader.js"></script>
+    <script src="./javascripts/shaders/quadShader.js"></script>
+    <script src="./javascripts/shaders/computationShader.js"></script>
+    <script src="./javascripts/shaders/velocityShader.js"></script>
+    <script src="./javascripts/shaders/drawingShader.js"></script>
+    <script src="./javascripts/shaders/denoiseShader.js"></script>
     <script src="./javascripts/CanvasRecorder.js"></script>
     <script src="./javascripts/main.js"></script>
   </body>

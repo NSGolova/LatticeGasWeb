@@ -49,7 +49,7 @@ const computationShader = `#version 300 es
   int periodicCoordinatePart(int k, int maxk) {
       if (k < 0) {
           return k + maxk;
-      } else if (k == (maxk - 1)) {
+      } else if (k == maxk) {
           return 0;
       } else {
           return k;
@@ -82,9 +82,13 @@ const computationShader = `#version 300 es
       nbors = oddNbors;
     }
 
+    ivec2 iScale = ivec2(scale);
+    ivec2 nborPosition;
+    uint nbor;
+
     for (uint dir = 0u, odir = 3u; dir < 6u; dir++, odir = (odir + 1u) % 6u) {
-      ivec2 nborPosition = periodicCoordinate(position + nbors[odir], ivec2(scale));
-      uint nbor = texelFetch(state, nborPosition, 0).x;
+      nborPosition = periodicCoordinate(position + nbors[odir], iScale);
+      nbor = texelFetch(state, nborPosition, 0).x;
       if (nbor != BOUNDARY) {
         // accept an inbound particle travelling in this direction, if there is one
         result |= nbor & (1u << dir);
@@ -113,13 +117,13 @@ const computationShader = `#version 300 es
         (pos.y < scale.y * 0.82 && pos.y > scale.y * 0.8 && pos.x < scale.x * 0.6 && pos.x > scale.x * 0.4)) {
         data.x = BOUNDARY;
     // } else if (pos.y < scale.y * 0.66 && pos.y > scale.y * 0.33) {
-    // } else if (position.x % 2 == 0 && position.y % 2 == 0) {
+    } else if (pos.y > scale.y * 0.01) {
       // int random = rand(pos);
       //   if (((random & NE) == NE) || ((random & NW) == NW)) {
       //     data.x = NE+NW;
       //   }
-    } else {
-      data.x = NE+NW + rand(pos);
+    // } else {
+      data.x = NE+NW;
     }
   }
 

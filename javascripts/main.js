@@ -4,11 +4,10 @@ var resolution;
 var viewsize;
 // State texture size
 var statesize;
+// Computation texture resolution.
+var gridSize = 1000.0;
 // Copy texture resolution multiplicator.
-var sizeMultiply = 10.0;
-
-var showVelocity = false;
-var velocityScale = 25;
+const viewMultiplicator = 16.0;
 
 var zoom = 0.1;
 var camera = [0., 0.];
@@ -69,6 +68,19 @@ var timers = [];
 var rulebookController;
 var selectedBook;
 
+var showVelocity = false;
+var velocityScale = 25;
+
+const VelocityColorType = {
+  HSV: 0,
+  Black: 1,
+  Custom: 2
+};
+var velocityColorType = VelocityColorType.HSV;
+var velocityColor = [1.0, 0.0, 0.0, 1.0];
+
+var denoise = false;
+
 var gl, gl2Available = false;
 var buffers, programs, framebuffers, textures;
 var curDrag, prevDrag;
@@ -80,9 +92,11 @@ var fpsLabel;
 var recording = false;
 var gif;
 
+var toolTabs;
 var speedSlider, resolutionSlider;
 var tresholdSlider, toolSizeSlider;
-var showVelocityToggle, velocitySlider;
+var showVelocityToggle, velocitySlider, velocityTabs;
+var denoiseToggle;
 
 main();
 
@@ -128,7 +142,8 @@ function setupShaderStructs() {
   programs = {
     copy: initShaderProgram(gl, quadShader, drawingShader),
     col: initShaderProgram(gl, quadShader, computationShader),
-    velocity: initShaderProgram(gl, quadShader, velocityShader)
+    velocity: initShaderProgram(gl, quadShader, velocityShader),
+    denoise: initShaderProgram(gl, quadShader, denoiseShader),
   };
 
   programVars = {
@@ -142,7 +157,9 @@ function setupShaderStructs() {
       camera: gl.getUniformLocation(programs.copy, 'camera'),
       zoom: gl.getUniformLocation(programs.copy, 'zoom'),
       resolution: gl.getUniformLocation(programs.copy, 'resolution'),
-      showVelocity: gl.getUniformLocation(programs.copy, 'showVelocity')
+      showVelocity: gl.getUniformLocation(programs.copy, 'showVelocity'),
+      velocityColorType: gl.getUniformLocation(programs.copy, 'velocityColorType'),
+      velocityColor: gl.getUniformLocation(programs.copy, 'velocityColor')
     },
     col: {
       quad: gl.getAttribLocation(programs.col, 'quad'),
@@ -162,6 +179,11 @@ function setupShaderStructs() {
       quad: gl.getAttribLocation(programs.velocity, 'quad'),
       state: gl.getUniformLocation(programs.velocity, 'state'),
       scale: gl.getUniformLocation(programs.velocity, 'scale')
+    },
+    denoise: {
+      quad: gl.getAttribLocation(programs.denoise, 'quad'),
+      state: gl.getUniformLocation(programs.denoise, 'state'),
+      scale: gl.getUniformLocation(programs.denoise, 'scale')
     }
   }
 
@@ -171,7 +193,8 @@ function setupShaderStructs() {
 
   framebuffers = {
       step: gl.createFramebuffer(),
-      hui: gl.createFramebuffer()
+      velocity: gl.createFramebuffer(),
+      denoise: gl.createFramebuffer()
   };
 }
 
@@ -184,8 +207,8 @@ function setupDefault() {
   recalculateTextures();
   selectedBook = rulebookController.selectedBook;
 
-  zoom = 100 / statesize[0];
-  camera = [-resolution[0] * 2.5, resolution[1] * (3 * resolution[0] / resolution[1])];
+  zoom = 70 / statesize[0];
+  camera = [-viewsize[0] / 4.0, viewsize[0] / 4.0];
 
   updatePreset();
 }
@@ -221,7 +244,7 @@ function resizeView() {
   canvas.width = resolution[0];
   canvas.height = resolution[1];
 
-  viewsize = new Float32Array([(Math.pow(2, baseLog(2, resolution[0]) + 1) * sizeMultiply) | 0, (Math.pow(2, baseLog(2, resolution[0]) + 1) * sizeMultiply) | 0]);
+  viewsize = new Float32Array([(statesize[0] * viewMultiplicator) | 0, (statesize[1] * viewMultiplicator) | 0]);
 }
 
 function recalculateTextures() {
@@ -233,8 +256,9 @@ function recalculateTextures() {
   canvas.width = resolution[0];
   canvas.height = resolution[1];
 
-  viewsize = new Float32Array([(Math.pow(2, baseLog(2, resolution[0]) + 1) * sizeMultiply) | 0, (Math.pow(2, baseLog(2, resolution[0]) + 1) * sizeMultiply) | 0]);
-  statesize = new Float32Array([(viewsize[0] / 16.0) | 0, (viewsize[1] / 16.0) | 0]);
+
+  statesize = new Float32Array([(gridSize) | 0, (gridSize) | 0]);
+  viewsize = new Float32Array([(statesize[0] * viewMultiplicator) | 0, (statesize[1] * viewMultiplicator) | 0]);
 
   textures = {
       front: createTexture(gl.REPEAT, gl.NEAREST),
@@ -242,6 +266,7 @@ function recalculateTextures() {
   };
 
   recalculateVelocityTexture();
+  recalculateDenoiseTexture();
 }
 
 function recalculateVelocityTexture() {
@@ -249,6 +274,18 @@ function recalculateVelocityTexture() {
     textures.velocityMap = createTexture(gl.REPEAT, gl.NEAREST, [statesize[0] / velocityScale, statesize[1] / velocityScale], true);
   } else {
     textures.velocityMap = null;
+  }
+}
+
+function updateShowVelocity(value) {
+
+}
+
+function recalculateDenoiseTexture() {
+  if (denoise) {
+    textures.denoise = createTexture(gl.REPEAT, gl.NEAREST, [viewsize[0], viewsize[1]], true);
+  } else {
+    textures.denoise = null;
   }
 }
 
@@ -572,27 +609,40 @@ function redraw() {
   if (showVelocity) {
     calculateVelocities();
   }
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  if (denoise) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.denoise);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+                            gl.TEXTURE_2D, textures.denoise, 0);
+  } else {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
 
   const program = programs.copy;
 
-  gl.activeTexture(gl.TEXTURE0);
+  gl.activeTexture(gl.TEXTURE2);
   gl.bindTexture(gl.TEXTURE_2D, textures.front);
 
-  gl.activeTexture(gl.TEXTURE1);
+  gl.activeTexture(gl.TEXTURE3);
   gl.bindTexture(gl.TEXTURE_2D, textures.velocityMap);
 
   gl.viewport(0, 0, viewsize[0], viewsize[1]);
 
   gl.useProgram(program);
 
-  gl.uniform1i(programVars.copy.state, 0);
-  gl.uniform1i(programVars.copy.velocityMap, 1);
+  gl.uniform1i(programVars.copy.state, 2);
+  gl.uniform1i(programVars.copy.velocityMap, 3);
 
   gl.uniform2f(programVars.copy.camera, camera[0], camera[1]);
   gl.uniform1f(programVars.copy.zoom, zoom);
   gl.uniform1i(programVars.copy.showVelocity, showVelocity ? 1 : 0);
-  gl.uniform1f(programVars.copy.velocityScale, velocityScale);
+
+  if (showVelocity) {
+    gl.uniform1f(programVars.copy.velocityScale, velocityScale);
+    gl.uniform1i(programVars.copy.velocityColorType, velocityColorType);
+    if (velocityColor) {
+      gl.uniform4f(programVars.copy.velocityColor, velocityColor[0], velocityColor[1], velocityColor[2], velocityColor[3]);
+    }
+  }
 
   drawScene(programVars.copy.quad);
   gl.uniform2f(programVars.copy.scale, viewsize[0], viewsize[1]);
@@ -601,18 +651,22 @@ function redraw() {
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
+  if (denoise) {
+    drawDenoise();
+  }
+
   fpsLabel.innerHTML = "fps: " + fps;
 }
 
 function calculateVelocities() {
-  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.hui);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.velocity);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
                           gl.TEXTURE_2D, textures.velocityMap, 0);
 
   const program = programs.velocity;
   const vars = programVars.velocity;
 
-  gl.activeTexture(gl.TEXTURE0);
+  gl.activeTexture(gl.TEXTURE4);
   gl.bindTexture(gl.TEXTURE_2D, textures.front);
 
   gl.viewport(0, 0, statesize[0] / velocityScale, statesize[1] / velocityScale);
@@ -621,8 +675,30 @@ function calculateVelocities() {
 
   drawScene(vars.quad);
 
-  gl.uniform1i(vars.state, 0);
+  gl.uniform1i(vars.state, 4);
   gl.uniform1f(vars.scale, velocityScale);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+function drawDenoise() {
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  const program = programs.denoise;
+  const vars = programVars.denoise;
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, textures.denoise);
+
+  gl.viewport(0, 0, viewsize[0], viewsize[1]);
+
+  gl.useProgram(program);
+
+  gl.uniform1i(vars.state, 0);
+
+  drawScene(vars.quad);
+  gl.uniform2f(vars.scale, viewsize[0], viewsize[1]);
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
@@ -898,9 +974,10 @@ function setupEventHandlers() {
       }
     }
     if (isFinite(event.key) && event.key != ' ' && event.target == document.body) {
-      selectTool(null, parseInt(event.key) - 1);
+      var index = parseInt(event.key) - 1;
+      selectTool(index);
+      toolTabs.selected = index;
     }
-
   })
 
   canvas.addEventListener("wheel", e => {
@@ -910,7 +987,7 @@ function setupEventHandlers() {
 
     if (e.shiftKey) {
       toolRadius += zoomAmount * (toolRadius / 20.0);
-      toolSizeSlider.setValue(Math.round(toolRadius * 2));
+      toolSizeSlider.setValue(toolRadius * 2);
     } else {
       const cameraFp = ScreenToPt(e.pageX, e.pageY);
 
@@ -1051,21 +1128,22 @@ function setupSliders() {
 
   resolutionSlider = new SliderInput(
     "settingsContainer",
-    "Details",
-    "Simulation grid size multiplicator.", 1, sizeMultiply, 115,
+    "Grid size",
+    "Simulation square grid size.", 1, gridSize, 30000,
     function (slider) {
-      sizeMultiply = slider.value;
+      gridSize = slider.value;
       resize();
-    }, "X");
+    }, "prtc");
 
     showVelocityToggle = new ToggleInput(
       "settingsContainer",
       "Show velocity",
-      "Show velocity arrows grid",
+      "Show velocity arrows grid. Decreases performance!",
       showVelocity,
     function(toggle) {
       showVelocity = toggle.checked;
       velocitySlider.hidden = !showVelocity;
+      velocityTabs.hidden = !showVelocity;
       recalculateVelocityTexture();
       redraw();
     });
@@ -1079,6 +1157,35 @@ function setupSliders() {
       recalculateVelocityTexture();
       redraw();
     }, null, !showVelocity);
+
+  velocityTabs = new TabInputs("settingsContainer", "arrowColor", [
+       {title: "HSV from arrow direcrtion.", image: "hsv-hex", selected: true},
+       {title: "Black", image: "black-circle"},
+       {title: "I will select myself"}], function (index) {
+         velocityColorType = index;
+       }, !showVelocity);
+
+  var colorPicker = document.createElement('input');
+  colorPicker.type = "color";
+  colorPicker.value = "#CC0000";
+  colorPicker.style.height = "35px";
+  colorPicker.addEventListener('input', function () {
+    velocityColor = this.value.hexToRgb();
+  });
+
+
+  velocityTabs.elements[2].append(colorPicker);
+
+  denoiseToggle = new ToggleInput(
+    "postSettingsContainer",
+    "Denoise",
+    "Enable denoise postprocessing. Decreases performance!",
+    denoise,
+  function(toggle) {
+    denoise = toggle.checked;
+    recalculateDenoiseTexture();
+    redraw();
+  });
 
   toolSizeSlider = new SliderInput(
     "toolOptionsContainer",
@@ -1107,7 +1214,6 @@ function setupSliders() {
 
 // TOFO: Move to classes.
 var g_setPresetElements;
-var g_selectToolElements;
 var g_selectShapeElements;
 function setPreset(elem, id) {
   for (var i = 0; i < g_setPresetElements.length; ++i) {
@@ -1116,11 +1222,9 @@ function setPreset(elem, id) {
   preset = id;
   updatePreset();
 }
-function selectTool(elem, id) {
-  for (var i = 0; i < g_selectToolElements.length; ++i) {
-    g_selectToolElements[i].className = i == id ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
-  }
-  tool = id == 2 ? 128 : id;
+function selectTool(toolID) {
+
+  tool = toolID == 2 ? 128 : toolID;
 
   var optionsTitle = document.querySelector('#toolOptionsTitle');
   var option0 = document.querySelector('#selectShape0');
@@ -1162,18 +1266,11 @@ function selectShape(elem, id) {
 }
 
 function setupButtons() {
-  g_selectToolElements = [];
-  for (var ii = 0; ii < 100; ++ii) {
-    var elem = document.getElementById("selectTool" + ii);
-    if (!elem) {
-      break;
-    }
-    g_selectToolElements.push(elem);
-    elem.onclick = function(elem, id) {
-      return function () {
-        selectTool(elem, id);
-      }}(elem, ii);
-  }
+ toolTabs = new TabInputs("toolTab", "tool", [
+    {title: "Particle generator (1)", image: "fan", selected: true},
+    {title: "Inpenetratable wall (2)", image: "wall"},
+    {title: "Clear (right-click or 3)", image: "erase"},
+    {title: "Apply image (4)", image: "apply-image"}], selectTool);
 
   g_selectShapeElements = [];
   for (var ii = 0; ii < 100; ++ii) {

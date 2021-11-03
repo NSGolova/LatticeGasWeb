@@ -16,9 +16,13 @@ const drawingShader = `#version 300 es
   uniform float velocityScale;
   uniform int showVelocity;
 
+  uniform int velocityColorType;
+  uniform vec4 velocityColor;
+
   out vec4 fragColor;
 
   const uint Nothing = 0u, E=1u, SE=2u, SW=4u, W=8u, NW=16u, NE=32u, REST=64u, BOUNDARY=128u;
+  const int hsvColorType = 0, blackColorType = 1, customColorType = 2;
 
   // square root of 3 over 2
   const float hex_factor = 0.8660254037844386;
@@ -131,7 +135,7 @@ const drawingShader = `#version 300 es
 
     float arrowSize = arrowTileSize();
     float arrowHeadLength = arrowSize / 6.0;
-    float arrowShaftThickness = 2.0;
+    float arrowShaftThickness = 4.0;
 
     // Make everything relative to the center, which may be fractional
     p -= p + (center.yx / velocityScale) * (arrowSize);
@@ -193,8 +197,8 @@ const drawingShader = `#version 300 es
       vec2 sqrPos = vec2(npos / 2.0).yx;
       sqrPos.y /= hex_factor;
 
-      if ((sqrPos.x < 0.0 && sqrPos.y < 0.0)
-      || (sqrPos.x > size.x && sqrPos.y > size.y)) {
+      if ((sqrPos.x < 0.0 || sqrPos.y < 0.0)
+      || (sqrPos.x > size.x || sqrPos.y > size.y)) {
         fragColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
       }
@@ -221,7 +225,18 @@ const drawingShader = `#version 300 es
       vec2 average = texelFetch(velocityMap, iPos, 0).yx * vec2(-1.0, -1.0);
 
       if (arrow(gl_FragCoord.xy, average, centerOffset) >= 0.9) {
-        fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        switch (velocityColorType) {
+          case hsvColorType:
+            fragColor = vectorAngleColor(average);
+            break;
+          case blackColorType:
+            fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+            break;
+          case customColorType:
+            fragColor = velocityColor;
+            break;
+        }
+
       } else {
         fragColor = angleColor;
       }

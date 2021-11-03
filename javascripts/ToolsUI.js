@@ -26,7 +26,7 @@ class SliderInput {
     div.id = this.id + "Container";
     div.innerHTML = `<div>
       <label id="${this.id}Label" title="${this.title}">${this.name}: </label>
-      <input type="text" id="${this.id}Input" name="fname" value="${this.value}" maxlength="3" size="1">
+      <input type="text" id="${this.id}Input" name="fname" value="${this.value}" maxlength="${(this.max + "").length}" size="1">
       ${this.unit ? `<label id="${this.id}Label">${this.unit}</label>` : ""}
     </div>
     <div><input type="range" id="${this.id}" min="${this.min}" max="${this.max}" value="${this.value}" step="1"></div>`;
@@ -41,7 +41,7 @@ class SliderInput {
       captureThis.delegate(captureThis);
     });
     input.addEventListener('input', function() {
-      tresholdLabel.value = this.value;
+      label.value = this.value;
       captureThis.value = this.value;
       captureThis.delegate(captureThis);
     });
@@ -84,7 +84,7 @@ class SliderInput {
   setValue(newValue) {
     this.value = newValue;
     this.label.value = newValue;
-    this.input.value = "" + newValue;
+    this.input.value = "" + Math.round(newValue);
 
     this.delegate(this);
   }
@@ -140,4 +140,85 @@ class ToggleInput {
 
     this.container.append(toggleButton);
   }
+}
+
+class TabInputs {
+  constructor(container, id, tabs, delegate, hidden) {
+
+    this.delegate = delegate;
+    this.id = id;
+    this.tabs = tabs;
+    if (typeof container === 'string' || container instanceof String) {
+      this.container = document.getElementById(container);
+    } else {
+      this.container = container;
+    }
+
+    this.hiddenValue = hidden;
+    this.setupUI();
+  }
+  setupUI() {
+
+    var elements = [];
+    const subContainer = document.createElement('div');
+    subContainer.className = "tabrow";
+    subContainer.style.height = "35px";
+    this.tabs.forEach((tab, i) => {
+      const div = document.createElement('div');
+      div.className = "tabrow-tab" + (tab.selected ?  " tabrow-tab-opened-accented" : "");
+      div.id = "select" + this.id + i;
+      div.title = tab.title;
+      div.style = "line-height: 35px; display: block;" + (tab.image ? `background-image: url('./images/${tab.image}.png');` : "") + "background-size: 28px;";
+
+      const captureThis = this;
+      div.onclick = function() {
+        captureThis.handleSelected(i);
+      };
+
+      subContainer.append(div);
+      elements.push(div);
+    });
+    this.subContainer = subContainer;
+    this.elements = elements;
+
+    if (!this.hidden) {
+      this.container.append(subContainer);
+    }
+  }
+
+  handleSelected(index) {
+    this.selected = index;
+    this.delegate(index);
+  }
+
+  set selected(index) {
+    for (var i = 0; i < this.elements.length; ++i) {
+      this.elements[i].className = i == index ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
+    }
+  }
+
+  set hidden(val){
+
+    this.hiddenValue = val;
+    if (val) {
+      this.hide();
+    } else {
+      this.show();
+    }
+  }
+
+  get hidden(){
+     return this.hiddenValue;
+  }
+
+  show() {
+    this.hiddenValue = false;
+    this.container.append(this.subContainer);
+  }
+
+  hide() {
+    this.hiddenValue = true;
+    this.container.removeChild(this.subContainer);
+  }
+
 }

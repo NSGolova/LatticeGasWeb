@@ -8,3 +8,16 @@ Object.defineProperty(String.prototype, "camelize", {
     writable: true,
     configurable: true
 });
+
+Object.defineProperty(String.prototype, "hexToRgb", {
+    value: function hexToRgb() {
+        var bigint = parseInt(this.replace(/[^0-9A-F]/gi, ''), 16);
+        var r = (bigint >> 16) & 255;
+        var g = (bigint >> 8) & 255;
+        var b = bigint & 255;
+
+        return [r / 256, g / 256, b / 256, 1.0];
+    },
+    writable: true,
+    configurable: true
+});
