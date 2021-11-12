@@ -414,9 +414,9 @@ class RuleBook {
   }
 
   //TODOL move this to shader
-  colissionMap() {
-    var result = new Uint8Array(129);
-    for (var i = 0; i < 128; i++) {
+  colissionMap(disableRandom) {
+    var result = new Uint8Array(256);
+    for (var i = 0; i < 256; i++) {
       result[i] = i;
     }
 
@@ -428,32 +428,37 @@ class RuleBook {
         if (rule.random) {
           shuffleArray(slicee);
         }
-        for (var j = 0; j < slicee.length; j++) {
+        for (var j = 0; j < (rule.random ? slicee.length : slicee.length - 1); j++) {
           result[slicee[j]] = (j == slicee.length - 1) ? slicee[0] : slicee[j + 1];
         }
       }
     });
     return result;
   }
+
+  equals(obj) {
+    for (var i = 0; i < this.rules.length; i++) {
+      if (!this.rules[i].equals(obj.rules[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
 }
 
 class Rule {
-  constructor(name, symmetric, random, collisions) {
+  constructor(name, symmetric, random, collisions, enabled=true) {
     this.name = name;
     this.symmetric = symmetric;
     this.random = random;
-    this.collisions = collisions;
-    this.enabled = true
+    this.collisions = [collisions];
+    this.enabled = enabled
   }
 
   copy() {
     var copyCollisions = [];
-    this.collisions.forEach((item, i) => {
-      var coll = [];
-      item.forEach((prtcl, n) => {
-        coll.push(prtcl);
-      });
-      copyCollisions.push(coll);
+    this.collisions[0].forEach((item, i) => {
+      copyCollisions.push(item);
     });
 
     return new Rule(this.name + " (copy)", this.symmetric, this.random, copyCollisions);
@@ -482,5 +487,9 @@ class Rule {
     } else {
       return this.collisions;
     }
+  }
+
+  equals(obj) {
+    return this.collisions[0].equals(obj.collisions[0]) && this.symmetric == obj.symmetric && this.random == obj.random && this.enabled == obj.enabled;
   }
 }

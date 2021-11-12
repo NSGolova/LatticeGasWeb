@@ -21,7 +21,9 @@ const drawingShader = `#version 300 es
 
   out vec4 fragColor;
 
-  const uint Nothing = 0u, E=1u, SE=2u, SW=4u, W=8u, NW=16u, NE=32u, REST=64u, BOUNDARY=128u;
+  const uint Nothing = 0u, E=1u, SE=2u, SW=4u, W=8u, NW=16u, NE=32u, REST=64u, TOOLM=128u;
+  const uint PARTICKLE = 0u, BOUNDARY=1u, GENERATOR=2u, SINK=4u;
+
   const int hsvColorType = 0, blackColorType = 1, customColorType = 2;
 
   // square root of 3 over 2
@@ -71,8 +73,13 @@ const drawingShader = `#version 300 es
       return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
   }
 
+  float atan2(in float y, in float x) {
+      bool s = (abs(x) > abs(y));
+      return mix(-atan(x,y), atan(y,x), s);
+  }
+
   vec4 vectorAngleColor(vec2 v) {
-      float angle = 0.5 + atan(v.y, v.x);
+      float angle = 0.5 + (atan(v.y, v.x) + 3.1415) / (3.1415 * 2.0);
       return vec4(hsv2rgb(vec3(angle, 1.0, 1.0)), 1.0);
   }
 
@@ -86,26 +93,55 @@ const drawingShader = `#version 300 es
     return velocity;
   }
 
+  vec4 colorFromParticle(uint prtcl) {
+    vec4 angleColor;
+    switch (prtcl) {
+      case Nothing:
+        angleColor = vec4(0.0, 0.0, 0.0, 1.0);
+        break;
+      case REST:
+        angleColor = vec4(0.6, 0.6, 0.6, 1.0);
+        break;
+      default:
+        // angleColor = vec4(hsv2rgb(vec3(float(prtcl) / 64.0, 1.0, 1.0)), 1.0);
+        angleColor = vectorAngleColor(velocityFromParticle(prtcl));
+    }
+    return angleColor;
+  }
+
   vec4 colorAt(ivec2 pos) {
     vec4 angleColor;
     uvec4 data = texelFetch(state, pos, 0);
-    if (data.y == 1u) {
+    if ((data.z & TOOLM) != 0u) {
       angleColor = vec4(1.0, 1.0, 1.0, 1.0);
     } else {
-      uint prtcl = data.x;
+      uint prtclType = data.y;
+      float alpha = float(data.x) / 128.0;
 
-      switch (prtcl) {
-        case Nothing:
-          angleColor = vec4(0.0, 0.0, 0.0, 1.0);
+      switch (prtclType) {
+        case PARTICKLE:
+          angleColor = colorFromParticle(data.w);
           break;
         case BOUNDARY:
-          angleColor = vec4(0.9, 0.9, 0.9, 1.0);
+          angleColor = vec4(0.9, 0.9, 0.9, alpha);
+          if (data.z != 0u) {
+            angleColor *= colorFromParticle(data.z);
+            angleColor.w = 1.0 - alpha;
+          }
           break;
-        case REST:
-          angleColor = vec4(0.6, 0.6, 0.6, 1.0);
+        case GENERATOR:
+          angleColor = vec4(0.0, 1.0, 0.0, alpha);
+          if (data.z != 0u) {
+            angleColor *= colorFromParticle(data.z);
+          }
           break;
-        default:
-          angleColor = vectorAngleColor(velocityFromParticle(prtcl));
+        case SINK:
+          angleColor = vec4(1.0, 0.0, 0.0, alpha);
+
+          if (data.z != 0u) {
+            angleColor *= colorFromParticle(data.z);
+          }
+          break;
       }
     }
 
@@ -222,7 +258,7 @@ const drawingShader = `#version 300 es
 
       ivec2 iPos = ivec2(sqrPos / velocityScale);
       vec2 centerOffset = vec2(velocityScale, velocityScale) / 2.0 - (sqrPos - vec2(iPos) * velocityScale);
-      vec2 average = texelFetch(velocityMap, iPos, 0).yx * vec2(-1.0, -1.0);
+      vec2 average = texelFetch(velocityMap, iPos, 0).yx * vec2(1.0, 1.0);
 
       if (arrow(gl_FragCoord.xy, average, centerOffset) >= 0.9) {
         switch (velocityColorType) {

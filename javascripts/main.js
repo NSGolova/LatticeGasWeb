@@ -32,14 +32,24 @@ const GasType = {
 var type = GasType.FHPIII;
 
 const ToolType = {
-  fan: 0,
-  wall: 1,
-  nothing: 2,
-  applyImage: 3,
+  brush: 0,
+  nothing: 1,
+  applyImage: 2,
   clear: 128
 };
+
+const BrushType = {
+  fan: 0,
+  wall: 1,
+  generator: 2,
+  sink: 3
+};
+
 // Tool for the left mouse button.
-var tool = ToolType.fan;
+var tool = ToolType.brush;
+var brush = BrushType.fan;
+var brushStrength = 128;
+var brushDirections = E+SE+SW+W+NW+NE+REST;
 // Tool for the right mouse button.
 var secondaryTool = ToolType.clear;
 
@@ -64,6 +74,8 @@ var shape = ToolShape.circle;
 // How fast simulation is calculated.
 var speed = 25;
 var timers = [];
+var animationTimer;
+var paused = false;
 
 var rulebookController;
 var selectedBook;
@@ -92,9 +104,9 @@ var fpsLabel;
 var recording = false;
 var gif;
 
-var toolTabs;
+var toolTabs, brushTabs, directionTabs;
 var speedSlider, resolutionSlider;
-var tresholdSlider, toolSizeSlider;
+var tresholdSlider, toolSizeSlider, brushStrengthSlider;
 var showVelocityToggle, velocitySlider, velocityTabs;
 var denoiseToggle;
 
@@ -116,7 +128,9 @@ function main() {
 
 function setupWebGL() {
   const canvas = document.querySelector('#glcanvas');
-  gl = canvas.getContext('webgl2');
+  gl = canvas.getContext('webgl2', {
+    premultipliedAlpha: false  // Ask for non-premultiplied alpha
+  });
 
   if (gl) {
     gl2Available = true;
@@ -199,7 +213,6 @@ function setupShaderStructs() {
 }
 
 function setupDefault() {
-
   rulebookController = new RulesController(function () {
     selectedBook = rulebookController.selectedBook;
   });
@@ -211,6 +224,7 @@ function setupDefault() {
   camera = [-viewsize[0] / 4.0, viewsize[0] / 4.0];
 
   updatePreset();
+  animationTimer = new Timer(redrawFrame, 0);
 }
 
 function colissionMap() {
@@ -396,7 +410,7 @@ function migrate(oldState) {
   redraw();
 }
 
-function createImageFromTexture(texture, width, height) {
+function dataFromTexture(texture, width, height) {
     // Create a framebuffer backed by the texture
     var framebuffer = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -405,116 +419,52 @@ function createImageFromTexture(texture, width, height) {
     // Read the contents of the framebuffer
     var data = new Uint8Array(width * height * 4);
     gl.readPixels(0, 0, width, height, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, data);
-    for (var i = 0; i < data.length; i++) {
-      if (data[i] != 0 && data[i] != 128) {
-        data[i] -= 1;
-      }
-    }
 
     gl.deleteFramebuffer(framebuffer);
 
-    var canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-
-    var context = canvas.getContext('2d');
-    var imageData = context.createImageData(width, height);
-    imageData.data.set(data);
-    context.putImageData(imageData, 0, 0);
-
-    return canvas.toDataURL("image/png").replace(/^data:image\/[^;]/, 'data:application/octet-stream');
-}
-
-function saveBase64AsFile(base64, fileName) {
-    var link = document.createElement("a");
-
-    document.body.appendChild(link); // for Firefox
-
-    link.setAttribute("href", base64);
-    link.setAttribute("download", fileName);
-    link.click();
+    return data; // canvas.toDataURL("image/png", 1.0); //.replace(/^data:image\/[^;]/, 'data:application/octet-stream');
 }
 
 function save() {
-  saveBase64AsFile(createImageFromTexture(textures.front, statesize[0], statesize[1]), "gasomaton.png");
-}
-
-function rgbaDataWithImage(image) {
-  var canvas = document.createElement("canvas");
-  canvas.width = image.width;
-  canvas.height = image.height;
-
-  var context = canvas.getContext('2d');
-  context.drawImage(image, 0, 0);
-
-  return context.getImageData(0, 0, image.width, image.height).data;
-}
-
-function createTextureFromImage(image) {
-  statesize = [image.width, image.height];
-  textures = {
-      front: createTexture(gl.REPEAT, gl.NEAREST),
-      back: createTexture(gl.REPEAT, gl.NEAREST)
+  let toSave = {
+    size: statesize,
+    rulebook: rulebookController.selectedBook,
+    state: dataFromTexture(textures.front, statesize[0], statesize[1]).toBase64String()
   };
 
-  recalculateVelocityTexture();
-
-  const uiData = rgbaDataWithImage(image);
-  var imgData = new Uint8Array(uiData);
-  for (var i = 0; i < imgData.length; i++) {
-    if (imgData[i] != 0 && imgData[i] != 128) {
-      imgData[i] += 1;
-    }
-  }
-
-  gl.bindTexture(gl.TEXTURE_2D, textures.front);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, statesize[0], statesize[1],
-                      0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, imgData);
+  saveJSONAsFile(JSON.stringify(toSave), "gasomaton.json");
 }
 
 function load() {
-  loadFile(createTextureFromImage);
+  loadFile(function (file) {
+    if (file.state && file.size) {
+      statesize = file.size;
+      textures = {
+          front: createTexture(gl.REPEAT, gl.NEAREST),
+          back: createTexture(gl.REPEAT, gl.NEAREST)
+      };
+
+      recalculateVelocityTexture();
+
+      gl.bindTexture(gl.TEXTURE_2D, textures.front);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, statesize[0], statesize[1],
+                          0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, file.state.base64ToArray());
+    }
+
+    if (file.rulebook) {
+      rulebookController.loadBook(file.rulebook);
+    }
+  });
 }
 
 function loadImageToApply() {
-  loadFile(function (image) {
-
-    const uiData = rgbaDataWithImage(image);
-
+  loadImage(function (image) {
     const texture = createTexture(gl.REPEAT, gl.NEAREST, [image.width, image.height]);
     textures.apply = texture;
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, image.width, image.height,
-                        0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, uiData);
+                        0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, image);
   })
-}
-
-function loadFile(completion) {
-  var input = document.createElement('input');
-  input.type = 'file';
-
-  input.onchange = e => {
-
-     // getting a hold of the file reference
-     var file = e.target.files[0];
-
-     // setting up the reader
-     var reader = new FileReader();
-     reader.readAsDataURL(file);
-
-     // here we tell the reader what to do when it's done reading...
-     reader.onload = readerEvent => {
-        var content = readerEvent.target.result;
-        const img = new Image();
-        img.onload = function() {
-          completion(img);
-        }
-        img.src = content;
-     }
-
-  }
-
-  input.click();
 }
 
 function swap() {
@@ -586,13 +536,13 @@ function stepProgram(program, vars, operation, oldSize) {
     gl.uniform1i(vars.selectedTool, tool);
     switch (toolInUse) {
       case ToolMode.none:
-        gl.uniform1i(vars.toolInUse, ToolType.nothing);
+        gl.uniform4i(vars.toolInUse, ToolType.nothing, 0, 0, 0);
         break;
       case ToolMode.main:
-        gl.uniform1i(vars.toolInUse, tool);
+        gl.uniform4i(vars.toolInUse, tool, brush, brushStrength, brushDirections);
         break;
       case ToolMode.secondary:
-        gl.uniform1i(vars.toolInUse, secondaryTool);
+        gl.uniform4i(vars.toolInUse, secondaryTool, brush, brushStrength, brushDirections);
         break;
     }
   }
@@ -714,7 +664,7 @@ function start() {
   const throttle = speed > 20 ? 0 : 20 - speed;
 
   for (var i = 0; i < timersCount; i++) {
-    timers.push(new Timer(animationFrame, throttle));
+    timers.push(new Timer(computationFrame, throttle));
   }
 }
 
@@ -725,9 +675,15 @@ function pause() {
   });
 }
 
-function animationFrame() {
+function computationFrame() {
     step();
-    redraw();
+}
+
+function redrawFrame() {
+  if (paused) {
+    stepNothing();
+  }
+  redraw();
 }
 
 //
@@ -975,8 +931,8 @@ function setupEventHandlers() {
     }
     if (isFinite(event.key) && event.key != ' ' && event.target == document.body) {
       var index = parseInt(event.key) - 1;
-      selectTool(index);
-      toolTabs.selected = index;
+      selectBrush(index);
+      brushTabs.selected = index;
     }
   })
 
@@ -988,6 +944,12 @@ function setupEventHandlers() {
     if (e.shiftKey) {
       toolRadius += zoomAmount * (toolRadius / 20.0);
       toolSizeSlider.setValue(toolRadius * 2);
+    } else if (e.altKey) {
+      let newStrength = brushStrength + zoomAmount * (brushStrength / 20.0);
+      if (newStrength >= 1 && newStrength <= 128) {
+        brushStrength = newStrength;
+        brushStrengthSlider.setValue(newStrength);
+      }
     } else {
       const cameraFp = ScreenToPt(e.pageX, e.pageY);
 
@@ -1027,19 +989,11 @@ function setupEventHandlers() {
         rightPressed = true;
 
         toolInUse = ToolMode.secondary;
-        if (paused) {
-          stepNothing();
-          redraw();
-        }
       }
       if (!dragging && e.button == 0) {
         leftPressed = true;
 
         toolInUse = ToolMode.main;
-        if (paused) {
-          stepNothing();
-          redraw();
-        }
       }
   });
 
@@ -1048,10 +1002,6 @@ function setupEventHandlers() {
       return;
     }
     toolPosition = ScreenToState(e.offsetX, e.offsetY);
-    if (paused) {
-      stepNothing();
-      redraw();
-    }
     curDrag = [e.offsetX, e.offsetY];
     if (dragging) {
       applyDrag();
@@ -1161,8 +1111,8 @@ function setupSliders() {
   velocityTabs = new TabInputs("settingsContainer", "arrowColor", [
        {title: "HSV from arrow direcrtion.", image: "hsv-hex", selected: true},
        {title: "Black", image: "black-circle"},
-       {title: "I will select myself"}], function (index) {
-         velocityColorType = index;
+       {title: "I will select myself"}], function (tab) {
+         velocityColorType = tab.selected;
        }, !showVelocity);
 
   var colorPicker = document.createElement('input');
@@ -1193,10 +1143,6 @@ function setupSliders() {
     "Or Shift+Wheel", 1, toolRadius * 2, 1000,
     function (slider) {
       toolRadius = slider.value / 2;
-      if (paused) {
-        stepNothing();
-        redraw();
-      }
     }, "X");
 
   tresholdSlider = new SliderInput(
@@ -1205,10 +1151,6 @@ function setupSliders() {
     "How dark pixels should be for a wall.", 1, imageToolTreshold, 1000,
     function (slider) {
       imageToolTreshold = slider.value;
-      if (paused) {
-        stepNothing();
-        redraw();
-      }
     }, null, true);
 }
 
@@ -1224,7 +1166,11 @@ function setPreset(elem, id) {
 }
 function selectTool(toolID) {
 
-  tool = toolID == 2 ? 128 : toolID;
+  if (toolID instanceof TabInputs) {
+    toolID = toolID.selected;
+  }
+
+  tool = toolID == ToolType.nothing ? ToolType.clear : toolID;
 
   var optionsTitle = document.querySelector('#toolOptionsTitle');
   var option0 = document.querySelector('#selectShape0');
@@ -1233,13 +1179,13 @@ function selectTool(toolID) {
     loadImageToApply();
     optionsTitle.innerHTML = "How to apply"
     option0.style.backgroundImage = "url('./images/normal-image.png')"
-    option0.title = "Normal image";
+    option0.title = "Normal image to walls";
 
     option1.style.backgroundImage = "url('./images/negative-image.png')"
     option1.style.backgroundColor = "black"
-    option1.title = "Negative image";
+    option1.title = "Negative image to walls";
 
-    tresholdSlider.show()
+    tresholdSlider.show();
 
   } else {
     textures.apply = null;
@@ -1251,26 +1197,52 @@ function selectTool(toolID) {
     option1.style.backgroundColor = ""
     option0.title = "Square";
 
-    tresholdSlider.hide()
+    tresholdSlider.hide();
   }
 }
+function selectBrush(brushTabs) {
+  brush = brushTabs.selected;
+}
+function selectDirection(directionTabs) {
+  brushDirections = 0;
+  directionTabs.selected.forEach((item, i) => {
+    brushDirections |= 1 << item;
+  });
+}
+
 function selectShape(elem, id) {
   for (var i = 0; i < g_selectShapeElements.length; ++i) {
     g_selectShapeElements[i].className = i == id ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
   }
   shape = id;
-  if (paused) {
-    stepNothing();
-    redraw();
-  }
 }
 
 function setupButtons() {
  toolTabs = new TabInputs("toolTab", "tool", [
-    {title: "Particle generator (1)", image: "fan", selected: true},
-    {title: "Inpenetratable wall (2)", image: "wall"},
-    {title: "Clear (right-click or 3)", image: "erase"},
-    {title: "Apply image (4)", image: "apply-image"}], selectTool);
+    {title: "Brush", image: "brush", selected: true},
+    {title: "Clear", image: "erase"},
+    {title: "Apply image", image: "apply-image"}], selectTool);
+ brushTabs = new TabInputs("toolTab", "brush", [
+  {title: "Fan (1)", image: "dryer", selected: true},
+  {title: "Inpenetratable wall (2)", image: "wall"},
+  {title: "Particle generator (3)", image: "fan"},
+  {title: "Particle sink (4)", image: "sink"}], selectBrush);
+  directionTabs = new MultiTabInputs("toolTab", "direction", [
+   {title: "Up", value: "🡡", selected: true},
+   {title: "Up-Right", value: "🡥", selected: true},
+   {title: "Down-Right", value: "🡦", selected: true},
+   {title: "Down", value: "🡣", selected: true},
+   {title: "Down-Left", value: "🡧", selected: true},
+   {title: "Up-Left", value: "🡤", selected: true},
+   {title: "All", image: "hsv-hex", selected: true}], selectDirection);
+
+  brushStrengthSlider = new SliderInput(
+    "toolOptionsContainer",
+    "Brush strength",
+    "Or Alt+Wheel", 1, brushStrength, 127,
+    function (slider) {
+      brushStrength = slider.value;
+    });
 
   g_selectShapeElements = [];
   for (var ii = 0; ii < 100; ++ii) {

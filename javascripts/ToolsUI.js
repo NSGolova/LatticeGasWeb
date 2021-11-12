@@ -169,6 +169,9 @@ class TabInputs {
       div.id = "select" + this.id + i;
       div.title = tab.title;
       div.style = "line-height: 35px; display: block;" + (tab.image ? `background-image: url('./images/${tab.image}.png');` : "") + "background-size: 28px;";
+      if (tab.value) {
+        div.innerHTML = tab.value;
+      }
 
       const captureThis = this;
       div.onclick = function() {
@@ -188,13 +191,18 @@ class TabInputs {
 
   handleSelected(index) {
     this.selected = index;
-    this.delegate(index);
+    this.delegate(this);
   }
 
   set selected(index) {
+    this.selectedIndex = index;
     for (var i = 0; i < this.elements.length; ++i) {
       this.elements[i].className = i == index ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
     }
+  }
+
+  get selected() {
+    return this.selectedIndex;
   }
 
   set hidden(val){
@@ -220,5 +228,41 @@ class TabInputs {
     this.hiddenValue = true;
     this.container.removeChild(this.subContainer);
   }
+}
 
+class MultiTabInputs extends TabInputs {
+  setupIndexes() {
+    this.selectedIndexes = [];
+    this.tabs.forEach((tab, i) => {
+      if (tab.selected) {
+        this.selectedIndexes.push(i);
+      }
+    });
+
+  }
+
+  set selected(index) {
+
+    if (!this.selectedIndexes) {
+      this.setupIndexes();
+    }
+
+    const indexPosition = this.selectedIndexes.indexOf(index);
+    if (indexPosition > -1) {
+      this.selectedIndexes.splice(indexPosition, 1);
+    } else {
+      this.selectedIndexes.push(index);
+    }
+
+    for (var i = 0; i < this.elements.length; ++i) {
+      this.elements[i].className = this.selectedIndexes.includes(i) ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
+    }
+  }
+
+  get selected() {
+    if (!this.selectedIndexes) {
+      this.setupIndexes();
+    }
+    return this.selectedIndexes;
+  }
 }

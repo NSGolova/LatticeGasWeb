@@ -30,7 +30,7 @@ const velocityShader = `#version 300 es
 
       for (float i = 0.0; i < scale; i += 1.0) {
         for (float j = 0.0; j < scale; j += 1.0) {
-          prtcl = texelFetch(state, ivec2(pos.x + i, pos.y + j), 0).x;
+          prtcl = texelFetch(state, ivec2(pos.x + i, pos.y + j), 0).w;
           for (uint i = 0u; i < 6u; i++) {
             if ((prtcl & (1u << i)) != 0u) {
               result += ci[i];

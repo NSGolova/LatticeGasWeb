@@ -13,30 +13,54 @@
 // affecting the mass or momentum of that node. For best results, a gas should be
 // "collision-saturated" - it swaps everything that can be swapped.
 
+// Cell direction
+const NOTHING = 0, E=1<<0, SE=1<<1, SW=1<<2, W=1<<3, NW=1<<4, NE=1<<5, REST=1<<6, VACANT1=1<<7;
+// Cell type
+const PARTICKLE = 0, BOUNDARY=1<<0, GENERATOR=1<<1, SINK=1<<2;
+
 // these are some possible collision classes to choose from:
 // first four from Fig. 1.6 in [1], for FHP6
-const E=1, SE=2, SW=4, W=8, NW=16, NE=32, REST=64, BOUNDARY=128;
-const pair_head_on = [[E+W, NE+SW, NW+SE]]; // i) "linear"
-const symmetric_3 = [[E+NW+SW, W+NE+SE]]; // ii) "triple"
-const two_plus_spectator = [[E+SW+NE, E+SE+NW]]; // iii) "lambda"
-const four_particles = [[NE+NW+SE+SW, E+W+SE+NW, E+W+NE+SW]]; // iv) "dual-linear"
+// i) "linear"
+const pair_head_on = [E+W, NE+SW, NW+SE];
+
+// ii) "triple"
+const symmetric_3 = [E+NW+SW, W+NE+SE];
+
+// iii) "lambda"
+const two_plus_spectator = [E+SW+NE, E+SE+NW];
+
+// iv) "dual-linear"
+const four_particles = [NE+NW+SE+SW, E+W+SE+NW, E+W+NE+SW];
+
 // next ones from Fig. 1.9 in [1], for FHP7
-const pair_head_on_plus_rest = // ii) and iii) "triple" and "linear+rest"
-    [[E+W+REST, NE+SW+REST, NW+SE+REST, E+NW+SW, W+NE+SE]];
-const pair_head_on_plus_rest_no_triple = // iii) "linear+rest" (used in FHP-II)
-    [[E+W+REST, NE+SW+REST, NW+SE+REST]];
-const one_plus_rest = [ // iv) and v) "fundamental+rest" and "jay"
-    [E+REST, SE+NE]];
-const two_plus_spectator_including_rest = [ // vi) and (vii) "lambda" and "jay+rest"
-    [E+SW+NE, E+SE+NW, NE+SE+REST]];
-const four_particles_including_rest_no_momentum = // viii) and ix) "dual-linear" and "dual-triple + rest"
-    [[NE+NW+SE+SW, E+W+SE+NW, E+W+NE+SW, E+NW+SW+REST, W+NE+SE+REST]];
-const symmetric_3_plus_rest = [[E+NW+SW+REST, W+NE+SE+REST]]; // "dual-triple + rest" (used in FHP-II)
-const four_particles_plus_rest = [[NE+NW+SE+SW+REST, E+W+SE+NW+REST, E+W+NE+SW+REST]]; // x) "dual-linear + rest"
-const five_particles_including_rest_momentum_one = [ // xi) and xii) "dual-fundamental" and "dual-jay + rest"
-    [NE+NW+W+SW+SE, E+W+NW+SW+REST]];
-const two_plus_spectator_plus_rest = [ // xiii) and xiv) "dual-lambda + rest" and "dual-jay"
-    [E+SW+NE+REST, E+SE+NW+REST, NE+SE+E+W]];
+// ii) and iii) "triple" and "linear+rest"
+const pair_head_on_plus_rest = [E+W+REST, NE+SW+REST, NW+SE+REST, E+NW+SW, W+NE+SE];
+
+// iii) "linear+rest" (used in FHP-II)
+const pair_head_on_plus_rest_no_triple = [E+W+REST, NE+SW+REST, NW+SE+REST];
+
+// iv) and v) "fundamental+rest" and "jay"
+const one_plus_rest = [E+REST, SE+NE];
+
+// vi) and (vii) "lambda" and "jay+rest"
+const two_plus_spectator_including_rest = [E+SW+NE, E+SE+NW, NE+SE+REST];
+
+// viii) and ix) "dual-linear" and "dual-triple + rest"
+const four_particles_including_rest_no_momentum = [NE+NW+SE+SW, E+W+SE+NW, E+W+NE+SW, E+NW+SW+REST, W+NE+SE+REST];
+
+// "dual-triple + rest" (used in FHP-II)
+const symmetric_3_plus_rest = [E+NW+SW+REST, W+NE+SE+REST];
+
+// x) "dual-linear + rest"
+const four_particles_plus_rest = [NE+NW+SE+SW+REST, E+W+SE+NW+REST, E+W+NE+SW+REST];
+
+// xi) and xii) "dual-fundamental" and "dual-jay + rest"
+const five_particles_including_rest_momentum_one = [NE+NW+W+SW+SE, E+W+NW+SW+REST];
+
+// xiii) and xiv) "dual-lambda + rest" and "dual-jay"
+const two_plus_spectator_plus_rest = [E+SW+NE+REST, E+SE+NW+REST, NE+SE+E+W];
+
+const wall_colision = [E+BOUNDARY, W];
 
 
 class RulesController {
@@ -119,6 +143,29 @@ class RulesController {
 
     this.setupUI();
     this.delegate();
+  }
+
+  loadBook(bookStruct) {
+    var rules = [];
+    bookStruct.rules.forEach((ruleStruct, i) => {
+      rules.push(new Rule(ruleStruct.name,
+                          ruleStruct.symmetric,
+                          ruleStruct.random,
+                          ruleStruct.collisions[0],
+                          ruleStruct.enabled));
+    });
+
+    let rulebook = new RuleBook(bookStruct.name, rules);
+    let rulebooksCount = this.rulebooks.length;
+    for (var i = 0; i < rulebooksCount; i++) {
+      if (rulebook.equals(this.rulebooks[i])) {
+        this.selectBook(i);
+        return;
+      }
+    }
+
+    this.rulebooks.push(rulebook);
+    this.selectBook(rulebooksCount);
   }
 }
 
