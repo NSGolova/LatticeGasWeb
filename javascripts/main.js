@@ -5,7 +5,7 @@ var viewsize;
 // State texture size
 var statesize;
 // Computation texture resolution.
-var gridSize = 1000.0;
+var gridSize = 1000.0; // max 8192
 // Copy texture resolution multiplicator.
 const viewMultiplicator = 16.0;
 
@@ -64,6 +64,8 @@ var shape = ToolShape.circle;
 // How fast simulation is calculated.
 var speed = 25;
 var timers = [];
+var animationTimer;
+var paused = false;
 
 var rulebookController;
 var selectedBook;
@@ -81,8 +83,10 @@ var velocityColor = [1.0, 0.0, 0.0, 1.0];
 
 var denoise = false;
 
-var gl, gl2Available = false;
-var buffers, programs, framebuffers, textures;
+var entry, adapter, device, context;
+
+var pipelines, bindgroups, pathDescriptors;
+var buffers, programs, framebuffers, textures, programVars;
 var curDrag, prevDrag;
 var cameraDest = [0., 0.];
 
@@ -100,9 +104,10 @@ var denoiseToggle;
 
 main();
 
-function main() {
-  setupWebGL();
-  setupShaderStructs();
+async function main() {
+  await setupWebGPU();
+  recalculateTextures();
+  await setupShaderStructs();
 
   setupFps();
 
@@ -114,103 +119,209 @@ function main() {
   setupEventHandlers();
 }
 
-function setupWebGL() {
-  const canvas = document.querySelector('#glcanvas');
-  gl = canvas.getContext('webgl2');
+async function setupWebGPU() {
+  try {
+    entry = navigator.gpu;
+    adapter = await navigator.gpu.requestAdapter();
+    device = await adapter.requestDevice();
 
-  if (gl) {
-    gl2Available = true;
-  }
-  // else {
-  //   gl = canvas.getContext('webgl');
-  // }
-
-  if (!gl) {
+    const canvas = document.querySelector('#glcanvas');
+    context = canvas.getContext('webgpu');
+  } catch (e) {
     const text = `
-    Unable to initialize WebGL. Your browser or machine may not support it.
-    Use Google Chrome for the best experience.
+    Unable to initialize WebGPU. Your browser or machine may not support it.
+    Use Google Chrome Canary for the best experience.
     Check out https://discussions.apple.com/thread/8655829 for Safari.
     `;
     alert(text);
-    return;
   }
-
-  gl.getExtension('EXT_color_buffer_float');
 }
 
-function setupShaderStructs() {
-  programs = {
-    copy: initShaderProgram(gl, quadShader, drawingShader),
-    col: initShaderProgram(gl, quadShader, computationShader),
-    velocity: initShaderProgram(gl, quadShader, velocityShader),
-    denoise: initShaderProgram(gl, quadShader, denoiseShader),
+function makeRequest(method, url) {
+    return new Promise(function (resolve, reject) {
+        let xhr = new XMLHttpRequest();
+        xhr.open(method, url);
+        xhr.onload = function () {
+            if (this.status >= 200 && this.status < 300) {
+                resolve(xhr.response);
+            } else {
+                reject({
+                    status: this.status,
+                    statusText: xhr.statusText
+                });
+            }
+        };
+        xhr.onerror = function () {
+            reject({
+                status: this.status,
+                statusText: xhr.statusText
+            });
+        };
+        xhr.send();
+    });
+}
+
+async function loadFil(file) {
+  return await makeRequest('GET', file);
+}
+
+async function setupShaderStructs() {
+  pipelines = {};
+  pathDescriptors = {};
+  programVars = {};
+  bindgroups = {};
+
+  await setupDrawingShader();
+  await setupComputationShader();
+}
+
+async function setupDrawingShader() {
+  const uniformBufferSize =
+    2 * 4 + // scale: vec2<f32>;
+    4 + // padding
+    2 * 4 + // size: vec2<f32>;
+    4 + // padding
+    2 * 4 + // camera: vec2<f32>;
+    4 + // padding
+    2 * 4 + // resolution: vec2<f32>;
+    4; // zoom: f32;
+
+  const uniformBuffer = device.createBuffer({
+    size: uniformBufferSize,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  var bindGroupLayout = device.createBindGroupLayout({
+    entries: [{
+          binding: 0,
+
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "uniform" }
+        }, {
+          binding: 1,
+
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: "uint", viewDimension: "2d", multisampled: false }
+      }
+    ]
+  });
+
+  const uniformBindGroup = device.createBindGroup({
+    layout: bindGroupLayout,
+    entries: [{
+        binding: 0,
+        resource: {
+          buffer: uniformBuffer,
+        },
+      }, {
+        binding: 1,
+        resource: textures.front.createView(),
+      },
+    ],
+  });
+
+  pipelines.copy = initPipeline(await loadFil('./javascripts/shaders/drawingShader.wgsl'), bindGroupLayout);
+  pathDescriptors.copy = {
+    colorAttachments: [
+      {
+        view: undefined, // Assigned later
+        loadValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+        storeOp: 'store',
+      },
+    ],
+  };
+  programVars.copy = uniformBuffer;
+  bindgroups.copy = uniformBindGroup;
+}
+
+async function setupComputationShader() {
+  var bindGroupLayout = device.createBindGroupLayout({
+    entries: [{
+      binding: 0,
+
+      visibility: GPUShaderStage.FRAGMENT,
+      buffer: { type: "uniform" }
+    }, {
+      binding: 1,
+
+      visibility: GPUShaderStage.FRAGMENT,
+      buffer: { type: "storage" }
+    }, {
+      binding: 2,
+
+      visibility: GPUShaderStage.FRAGMENT,
+      texture: { sampleType: "uint", viewDimension: "2d", multisampled: false }
+    }]
+  });
+
+  const uniformBufferSize =
+    2 * 4 + // scale: vec2<f32>;
+    4 + // padding
+    4; // operation: i32;
+
+  const uniformBuffer = device.createBuffer({
+    size: uniformBufferSize,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  const storageBufferSize =
+    129 * 4; // map: array<u32>;
+
+  const storageBuffer = device.createBuffer({
+    size: storageBufferSize,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+
+  const groupDescription = {
+    layout: bindGroupLayout,
+    entries: [{
+        binding: 0,
+        resource: {
+          buffer: uniformBuffer,
+        },
+      }, {
+        binding: 1,
+        resource: {
+          buffer: storageBuffer,
+        },
+      }, {
+        binding: 2,
+        resource: textures.back.createView(),
+      },
+    ],
   };
 
-  programVars = {
-    copy: {
-      quad: gl.getAttribLocation(programs.copy, 'quad'),
-      state: gl.getUniformLocation(programs.copy, 'state'),
-      velocityMap: gl.getUniformLocation(programs.copy, 'velocityMap'),
-      size: gl.getUniformLocation(programs.copy, 'size'),
-      scale: gl.getUniformLocation(programs.copy, 'scale'),
-      velocityScale: gl.getUniformLocation(programs.copy, 'velocityScale'),
-      camera: gl.getUniformLocation(programs.copy, 'camera'),
-      zoom: gl.getUniformLocation(programs.copy, 'zoom'),
-      resolution: gl.getUniformLocation(programs.copy, 'resolution'),
-      showVelocity: gl.getUniformLocation(programs.copy, 'showVelocity'),
-      velocityColorType: gl.getUniformLocation(programs.copy, 'velocityColorType'),
-      velocityColor: gl.getUniformLocation(programs.copy, 'velocityColor')
-    },
-    col: {
-      quad: gl.getAttribLocation(programs.col, 'quad'),
-      state: gl.getUniformLocation(programs.col, 'state'),
-      scale: gl.getUniformLocation(programs.col, 'scale'),
-      oldSize: gl.getUniformLocation(programs.col, 'oldSize'),
-      colissionMap: gl.getUniformLocation(programs.col, 'colissionMap'),
-      tool: gl.getUniformLocation(programs.col, 'tool'),
-      shape: gl.getUniformLocation(programs.col, 'shape'),
-      toolInUse: gl.getUniformLocation(programs.col, 'toolInUse'),
-      operation: gl.getUniformLocation(programs.col, 'operation'),
-      imageToApply: gl.getUniformLocation(programs.col, 'imageToApply'),
-      selectedTool: gl.getUniformLocation(programs.col, 'selectedTool'),
-      applyImageTreshold: gl.getUniformLocation(programs.col, 'applyImageTreshold')
-    },
-    velocity: {
-      quad: gl.getAttribLocation(programs.velocity, 'quad'),
-      state: gl.getUniformLocation(programs.velocity, 'state'),
-      scale: gl.getUniformLocation(programs.velocity, 'scale')
-    },
-    denoise: {
-      quad: gl.getAttribLocation(programs.denoise, 'quad'),
-      state: gl.getUniformLocation(programs.denoise, 'state'),
-      scale: gl.getUniformLocation(programs.denoise, 'scale')
-    }
-  }
+  const uniformBindGroup = device.createBindGroup(groupDescription);
 
-  buffers = {
-      quad: createArray(new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]))
+  pipelines.col = initPipeline(await loadFil('./javascripts/shaders/computationShader.wgsl'), bindGroupLayout, 'rgba8uint');
+  pathDescriptors.col = {
+    colorAttachments: [
+      {
+        view: undefined, // Assigned later
+        loadValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+        storeOp: 'store',
+      },
+    ],
   };
-
-  framebuffers = {
-      step: gl.createFramebuffer(),
-      velocity: gl.createFramebuffer(),
-      denoise: gl.createFramebuffer()
-  };
+  programVars.colDescription = groupDescription;
+  programVars.colUniform = uniformBuffer;
+  programVars.colStorage = storageBuffer;
+  bindgroups.col = uniformBindGroup;
 }
 
 function setupDefault() {
-
   rulebookController = new RulesController(function () {
     selectedBook = rulebookController.selectedBook;
   });
 
-  recalculateTextures();
   selectedBook = rulebookController.selectedBook;
 
   zoom = 70 / statesize[0];
-  camera = [-viewsize[0] / 4.0, viewsize[0] / 4.0];
+  camera = [-viewsize[0] / 4.0, -viewsize[0] / 4.0];
 
   updatePreset();
+
+  animationTimer = new Timer(redrawFrame, 0);
 }
 
 function colissionMap() {
@@ -229,7 +340,7 @@ function resize() {
 
   textures.front = oldFront;
   stepResize(oldStatesize);
-  textures.back = createTexture(gl.REPEAT, gl.NEAREST);
+  textures.back = createTexture();
   step();
   redraw();
   start();
@@ -260,66 +371,138 @@ function recalculateTextures() {
   statesize = new Float32Array([(gridSize) | 0, (gridSize) | 0]);
   viewsize = new Float32Array([(statesize[0] * viewMultiplicator) | 0, (statesize[1] * viewMultiplicator) | 0]);
 
+  const presentationFormat = context.getPreferredFormat(adapter);
+
+  context.configure({
+    device: device,
+    format: presentationFormat,
+    size: resolution,
+  });
+
   textures = {
-      front: createTexture(gl.REPEAT, gl.NEAREST),
-      back: createTexture(gl.REPEAT, gl.NEAREST)
+      front: createTexture(),
+      back: createTexture()
   };
+  textures.selected = textures.back;
 
-  recalculateVelocityTexture();
-  recalculateDenoiseTexture();
+
+  // recalculateVelocityTexture();
+  // recalculateDenoiseTexture();
 }
 
-function recalculateVelocityTexture() {
-  if (showVelocity) {
-    textures.velocityMap = createTexture(gl.REPEAT, gl.NEAREST, [statesize[0] / velocityScale, statesize[1] / velocityScale], true);
-  } else {
-    textures.velocityMap = null;
-  }
-}
+function initPipeline(shaderCode, layout, format) {
+  let pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [layout]});
+  return device.createRenderPipeline({
+    layout: pipelineLayout,
+    vertex: {
+      module: device.createShaderModule({
+        code: shaderCode,
+      }),
+      entryPoint: 'vs_main',
+    },
+    fragment: {
+      module: device.createShaderModule({
+        code: shaderCode,
+      }),
+      entryPoint: 'fs_main',
+      // buffers: [
+      //   {
+      //     // instanced particles buffer
+      //     arrayStride: 4 * 4,
+      //     stepMode: 'instance',
+      //     attributes: [
+      //       {
+      //         // position
+      //         shaderLocation: 0,
+      //         offset: 0,
+      //         format: 'float32x2',
+      //       },
+      //       {
+      //         // color
+      //         shaderLocation: 1,
+      //         offset: 2 * 4,
+      //         format: 'float32x2',
+      //       },
+      //     ],
+      //   },
+      // ],
+      targets: [
+        {
+          format: (format ? format : context.getPreferredFormat(adapter)),
+        },
+      ],
+      // targets: [
+      //   {
+      //     format: context.getPreferredFormat(adapter),
+      //     blend: {
+      //       color: {
+      //         srcFactor: 'src-alpha',
+      //         dstFactor: 'one',
+      //         operation: 'add',
+      //       },
+      //       alpha: {
+      //         srcFactor: 'zero',
+      //         dstFactor: 'one',
+      //         operation: 'add',
+      //       },
+      //     },
+      //   },
+      // ],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
 
-function updateShowVelocity(value) {
-
-}
-
-function recalculateDenoiseTexture() {
-  if (denoise) {
-    textures.denoise = createTexture(gl.REPEAT, gl.NEAREST, [viewsize[0], viewsize[1]], true);
-  } else {
-    textures.denoise = null;
-  }
+    // depthStencil: {
+    //   depthWriteEnabled: false,
+    //   depthCompare: 'less',
+    //   format: 'depth24plus',
+    // },
+  });
 }
 
 function createTexture(wrap, filter, size, isFloat) {
-    var texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    wrap = wrap == null ? gl.CLAMP_TO_EDGE : wrap;
-    filter = filter == null ? gl.LINEAR : filter;
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    // var texture = gl.createTexture();
+    // gl.bindTexture(gl.TEXTURE_2D, texture);
+    // wrap = wrap == null ? gl.CLAMP_TO_EDGE : wrap;
+    // filter = filter == null ? gl.LINEAR : filter;
+    // gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+    // gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+    // gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    // gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    //
+    // gl.bindTexture(gl.TEXTURE_2D, texture);
+    //
+    // if (isFloat) {
+    //   if (size) {
+    //     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, size[0], size[1],
+    //                       0, gl.RGBA, gl.HALF_FLOAT, null);
+    //   } else {
+    //     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, statesize[0], statesize[1],
+    //                       0, gl.RGBA, gl.HALF_FLOAT, null);
+    //   }
+    // } else {
+    //   if (size) {
+    //     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, size[0], size[1],
+    //                       0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, null);
+    //   } else {
+    //     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, statesize[0], statesize[1],
+    //                       0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, null);
+    //   }
+    // }
 
-    gl.bindTexture(gl.TEXTURE_2D, texture);
+    return device.createTexture({
+      size: size ? [size[0], size[1], 1] : [statesize[0], statesize[1], 1],
+      mipLevelCount: 1,
+      format: 'rgba8uint',
+      usage:
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.STORAGE_BINDING |
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.RENDER_ATTACHMENT,
+    });
 
-    if (isFloat) {
-      if (size) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, size[0], size[1],
-                          0, gl.RGBA, gl.HALF_FLOAT, null);
-      } else {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, statesize[0], statesize[1],
-                          0, gl.RGBA, gl.HALF_FLOAT, null);
-      }
-    } else {
-      if (size) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, size[0], size[1],
-                          0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, null);
-      } else {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, statesize[0], statesize[1],
-                          0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, null);
-      }
-    }
-
-    return texture;
+    // return texture;
 }
 
 function createArray(data) {
@@ -327,73 +510,6 @@ function createArray(data) {
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
     return buffer;
-}
-
-function set(state) {
-    var rgba = new Int8Array(statesize[0] * statesize[1] * 4);
-    for (var i = 0; i < statesize[0]; i++) {
-      for (var j = 0; j < statesize[1]; j++) {
-        var ii = i * statesize[0] + j;
-        for (var d = 0; d < 4; d++) {
-          rgba[ii * 4 + d] = state[i][j][d];
-        }
-      }
-    }
-
-    gl.bindTexture(gl.TEXTURE_2D, textures.front);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0,
-                     statesize[0], statesize[1],
-                     gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, rgba);
-}
-
-function get() {
-    var w = statesize[0], h = statesize[1];
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.step);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
-                            gl.TEXTURE_2D, textures.front, 0);
-    var rgba = new Uint8Array(w * h * 4);
-    gl.readPixels(0, 0, w, h, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, rgba);
-    var state = new Array(w);
-
-    for (var i = 0; i < statesize[0]; i++) {
-      state[i] = [];
-      for (var j = 0; j < statesize[1]; j++) {
-        var ii = i * statesize[0] + j;
-        state[i][j] = new Uint8Array(4);
-        for (var d = 0; d < 4; d++) {
-          state[i][j][d] = rgba[ii * 4 + d];
-        }
-      }
-    }
-    return state;
-}
-
-function migrate(oldState) {
-  var result = new Array(statesize[0]);
-
-  if (oldState.length > statesize[0]) {
-    result = oldState.slice(oldState.length / 2 - statesize[0] / 2, oldState.length / 2 + statesize[0] / 2);
-    for (var x = 0; x < statesize[0]; x++) {
-      result[x] = result[x].slice(oldState[0].length / 2 - statesize[1] / 2, oldState[0].length / 2 + statesize[1] / 2);
-    }
-  } else {
-    const widthStart = statesize[0] / 2 - oldState.length / 2, widthEnd = oldState.length / 2 + statesize[0] / 2;
-    const heigthStart = statesize[1] / 2 - oldState[0].length / 2, heightEnd = oldState[0].length / 2 + statesize[1] / 2;
-    for (var i = 0; i < statesize[0]; i++) {
-      result[i] = [];
-      for (var j = 0; j < statesize[1]; j++) {
-        result[i][j] = new Uint8Array(4);
-        if (i > widthStart && i < widthEnd &&
-        j > heigthStart && j < heightEnd) {
-          for (var d = 0; d < 4; d++) {
-            result[i][j][d] = oldState[i - widthStart][j - heigthStart][d];
-          }
-        }
-      }
-    }
-  }
-  set(result);
-  redraw();
 }
 
 function createImageFromTexture(texture, width, height) {
@@ -468,8 +584,8 @@ function createTextureFromImage(image) {
   }
 
   gl.bindTexture(gl.TEXTURE_2D, textures.front);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, statesize[0], statesize[1],
-                      0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, imgData);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, statesize[0], statesize[1],
+                      0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, imgData);
 }
 
 function load() {
@@ -518,189 +634,190 @@ function loadFile(completion) {
 }
 
 function swap() {
-    var tmp = textures.front;
-    textures.front = textures.back;
-    textures.back = tmp;
+  var groupDescription = programVars.colDescription;
+
+  if (textures.selected == textures.back) {
+    textures.selected = textures.front;
+  } else {
+    textures.selected = textures.back;
+  }
+
+  groupDescription.entries[2].resource = textures.selected.createView();
+
+  programVars.colDescription = groupDescription;
+  bindgroups.col = device.createBindGroup(groupDescription);
 }
 
 function updatePreset() {
-  stepProgram(programs.col, programVars.col, preset);
+  stepProgram(preset);
   redraw();
 }
 
 function stepResize(oldSize) {
-  stepProgram(programs.col, programVars.col, OperationType.resize, oldSize);
+  stepProgram(OperationType.resize, oldSize);
 }
 
 function stepRandom() {
-  stepProgram(programs.col, programVars.col, OperationType.initializeRandom);
+  stepProgram(OperationType.initializeRandom);
 }
 
 function stepWind() {
-  stepProgram(programs.col, programVars.col, OperationType.initializeWind);
+  stepProgram(OperationType.initializeWind);
 }
 
 function stepClear() {
-  stepProgram(programs.col, programVars.col, OperationType.clear);
+  stepProgram(OperationType.clear);
 }
 
 function stepNothing() {
-  stepProgram(programs.col, programVars.col, OperationType.nothing);
+  stepProgram(OperationType.nothing);
 }
 
 function step() {
-  stepProgram(programs.col, programVars.col, OperationType.collision);
+  stepProgram(OperationType.collision);
 }
 
-function stepProgram(program, vars, operation, oldSize) {
-  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.step);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
-                          gl.TEXTURE_2D, textures.back, 0);
+function stepProgram(operation, oldSize) {
 
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, textures.front);
+  // if (!pathDescriptors.col.colorAttachments[0].view) {
+    device.queue.writeBuffer(
+      programVars.colUniform,
+      0,
+        new Float32Array([
+          statesize[0],  statesize[1], // scale
+          operation
+      ])
+    );
+    device.queue.writeBuffer(
+      programVars.colStorage,
+      0,
+      new Uint32Array(colissionMap())
+    );
+  // }
+  
+  if (textures.back == textures.selected) {
+    pathDescriptors.col.colorAttachments[0].view = textures.front.createView();
+  } else {
+    pathDescriptors.col.colorAttachments[0].view = textures.back.createView();
+  }
+  
 
-  if (textures.apply) {
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, textures.apply);
+  const commandEncoder = device.createCommandEncoder();
+  // {
+  //   const passEncoder = commandEncoder.beginComputePass();
+  //   passEncoder.setPipeline(computePipeline);
+  //   passEncoder.setBindGroup(0, computeBindGroup);
+  //   passEncoder.dispatch(Math.ceil(numParticles / 64));
+  //   passEncoder.endPass();
+  // }
+  {
+    const passEncoder = commandEncoder.beginRenderPass(pathDescriptors.col);
+
+    // bindgroups.col.entries[2].resource = textures.front.createView();
+    passEncoder.setPipeline(pipelines.col);
+    passEncoder.setBindGroup(0, bindgroups.col);
+    // passEncoder.setVertexBuffer(0, initBuffers(device));
+    passEncoder.draw(6, 1, 0, 0);
+    passEncoder.endPass();
   }
 
-  gl.viewport(0, 0, statesize[0], statesize[1]);
+  device.queue.submit([commandEncoder.finish()]);
 
-  gl.useProgram(program);
+  // gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.step);
+  // gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+  //                         gl.TEXTURE_2D, textures.back, 0);
 
-  drawScene(vars.quad);
+  // gl.activeTexture(gl.TEXTURE0);
+  // gl.bindTexture(gl.TEXTURE_2D, textures.front);
 
-  if (textures.apply) {
-    gl.uniform1i(vars.imageToApply, 1);
-    gl.uniform1ui(vars.applyImageTreshold, imageToolTreshold);
-  }
+  // gl.viewport(0, 0, statesize[0], statesize[1]);
 
-  gl.uniform1i(vars.state, 0);
-  gl.uniform1i(vars.operation, operation);
-  gl.uniform2f(vars.scale, statesize[0], statesize[1]);
-  gl.uniform1uiv(vars.colissionMap, colissionMap());
-  if (toolPosition) {
-    gl.uniform3f(vars.tool, toolPosition.x, toolPosition.y, toolRadius);
-    gl.uniform1i(vars.shape, shape);
-    gl.uniform1i(vars.selectedTool, tool);
-    switch (toolInUse) {
-      case ToolMode.none:
-        gl.uniform1i(vars.toolInUse, ToolType.nothing);
-        break;
-      case ToolMode.main:
-        gl.uniform1i(vars.toolInUse, tool);
-        break;
-      case ToolMode.secondary:
-        gl.uniform1i(vars.toolInUse, secondaryTool);
-        break;
-    }
-  }
-  if (oldSize) {
-    gl.uniform2f(vars.oldSize, oldSize[0], oldSize[1]);
-  }
+  // gl.useProgram(program);
 
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  // drawScene(vars.quad);
+
+  // gl.uniform1i(vars.state, 0);
+  // gl.uniform1i(vars.operation, operation);
+  // gl.uniform2f(vars.scale, statesize[0], statesize[1]);
+  // gl.uniform1uiv(vars.colissionMap, colissionMap());
+
+  // gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
   swap();
 }
 
 function redraw() {
-  if (showVelocity) {
-    calculateVelocities();
-  }
-  if (denoise) {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.denoise);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
-                            gl.TEXTURE_2D, textures.denoise, 0);
-  } else {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  }
 
-  const program = programs.copy;
+  // if (!pathDescriptors.copy.colorAttachments[0].view) {
+    device.queue.writeBuffer(
+      programVars.copy,
+      0,
+        new Float32Array([
+        viewsize[0],  viewsize[1], // scale
+        // 0, // padding
+        statesize[0], statesize[1], // size
+        // 0, // padding
+        camera[0], camera[1], // camera
+        // 0, // padding
+        resolution[0], resolution[1], // resolution
+        zoom
+      ])
+    );
+    
+    
+  // }
+  const swapChainTexture = context.getCurrentTexture();
+  pathDescriptors.copy.colorAttachments[0].view = swapChainTexture.createView();
 
-  gl.activeTexture(gl.TEXTURE2);
-  gl.bindTexture(gl.TEXTURE_2D, textures.front);
+    const commandEncoder = device.createCommandEncoder();
+    // {
+    //   const passEncoder = commandEncoder.beginComputePass();
+    //   passEncoder.setPipeline(computePipeline);
+    //   passEncoder.setBindGroup(0, computeBindGroup);
+    //   passEncoder.dispatch(Math.ceil(numParticles / 64));
+    //   passEncoder.endPass();
+    // }
+    {
+      const passEncoder = commandEncoder.beginRenderPass(pathDescriptors.copy);
 
-  gl.activeTexture(gl.TEXTURE3);
-  gl.bindTexture(gl.TEXTURE_2D, textures.velocityMap);
-
-  gl.viewport(0, 0, viewsize[0], viewsize[1]);
-
-  gl.useProgram(program);
-
-  gl.uniform1i(programVars.copy.state, 2);
-  gl.uniform1i(programVars.copy.velocityMap, 3);
-
-  gl.uniform2f(programVars.copy.camera, camera[0], camera[1]);
-  gl.uniform1f(programVars.copy.zoom, zoom);
-  gl.uniform1i(programVars.copy.showVelocity, showVelocity ? 1 : 0);
-
-  if (showVelocity) {
-    gl.uniform1f(programVars.copy.velocityScale, velocityScale);
-    gl.uniform1i(programVars.copy.velocityColorType, velocityColorType);
-    if (velocityColor) {
-      gl.uniform4f(programVars.copy.velocityColor, velocityColor[0], velocityColor[1], velocityColor[2], velocityColor[3]);
+      // bindgroups.copy.entries[1].resource = textures.front.createView();
+      passEncoder.setPipeline(pipelines.copy);
+      passEncoder.setBindGroup(0, bindgroups.copy);
+      // passEncoder.setVertexBuffer(0, initBuffers(device));
+      passEncoder.draw(6, 1, 0, 0);
+      passEncoder.endPass();
     }
-  }
 
-  drawScene(programVars.copy.quad);
-  gl.uniform2f(programVars.copy.scale, viewsize[0], viewsize[1]);
-  gl.uniform2f(programVars.copy.size, statesize[0], statesize[1]);
-  gl.uniform2f(programVars.copy.resolution, resolution[0], resolution[1]);
+    device.queue.submit([commandEncoder.finish()]);
 
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-  if (denoise) {
-    drawDenoise();
-  }
+  // const program = programs.copy;
+  //
+  // gl.activeTexture(gl.TEXTURE2);
+  // gl.bindTexture(gl.TEXTURE_2D, textures.front);
+  //
+  // gl.activeTexture(gl.TEXTURE3);
+  // gl.bindTexture(gl.TEXTURE_2D, textures.velocityMap);
+  //
+  // gl.viewport(0, 0, viewsize[0], viewsize[1]);
+  //
+  // gl.useProgram(program);
+  //
+  // gl.uniform1i(programVars.copy.state, 2);
+  // gl.uniform1i(programVars.copy.velocityMap, 3);
+  //
+  // gl.uniform2f(programVars.copy.camera, camera[0], camera[1]);
+  // gl.uniform1f(programVars.copy.zoom, zoom);
+  // gl.uniform1i(programVars.copy.showVelocity, showVelocity ? 1 : 0);
+  //
+  // drawScene(programVars.copy.quad);
+  // gl.uniform2f(programVars.copy.scale, viewsize[0], viewsize[1]);
+  // gl.uniform2f(programVars.copy.size, statesize[0], statesize[1]);
+  // gl.uniform2f(programVars.copy.resolution, resolution[0], resolution[1]);
+  //
+  // gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
   fpsLabel.innerHTML = "fps: " + fps;
-}
-
-function calculateVelocities() {
-  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.velocity);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
-                          gl.TEXTURE_2D, textures.velocityMap, 0);
-
-  const program = programs.velocity;
-  const vars = programVars.velocity;
-
-  gl.activeTexture(gl.TEXTURE4);
-  gl.bindTexture(gl.TEXTURE_2D, textures.front);
-
-  gl.viewport(0, 0, statesize[0] / velocityScale, statesize[1] / velocityScale);
-
-  gl.useProgram(program);
-
-  drawScene(vars.quad);
-
-  gl.uniform1i(vars.state, 4);
-  gl.uniform1f(vars.scale, velocityScale);
-
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-}
-
-function drawDenoise() {
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-  const program = programs.denoise;
-  const vars = programVars.denoise;
-
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, textures.denoise);
-
-  gl.viewport(0, 0, viewsize[0], viewsize[1]);
-
-  gl.useProgram(program);
-
-  gl.uniform1i(vars.state, 0);
-
-  drawScene(vars.quad);
-  gl.uniform2f(vars.scale, viewsize[0], viewsize[1]);
-
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
 function start() {
@@ -714,7 +831,7 @@ function start() {
   const throttle = speed > 20 ? 0 : 20 - speed;
 
   for (var i = 0; i < timersCount; i++) {
-    timers.push(new Timer(animationFrame, throttle));
+    timers.push(new Timer(computationFrame, throttle));
   }
 }
 
@@ -725,122 +842,15 @@ function pause() {
   });
 }
 
-function animationFrame() {
+function computationFrame() {
     step();
-    redraw();
 }
 
-//
-// initBuffers
-//
-// Initialize the buffers we'll need. For this demo, we just
-// have one object -- a simple two-dimensional square.
-//
-function initBuffers(gl) {
-
-  // Create a buffer for the square's positions.
-
-  const positionBuffer = gl.createBuffer();
-
-  // Select the positionBuffer as the one to apply buffer
-  // operations to from here out.
-
-  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-
-  // Now create an array of positions for the square.
-
-  // const positions = [
-  //    1.0,  1.0,
-  //   -1.0,  1.0,
-  //    1.0, -1.0,
-  //   -1.0, -1.0,
-  // ];
-
-  const positions = [
-     -1.0,  -1.0,
-    1.0,  -1.0,
-     -1.0, 1.0,
-    1.0, 1.0,
-  ];
-
-  // Now pass the list of positions into WebGL to build the
-  // shape. We do this by creating a Float32Array from the
-  // JavaScript array, then use it to fill the current buffer.
-
-  gl.bufferData(gl.ARRAY_BUFFER,
-                new Float32Array(positions),
-                gl.STATIC_DRAW);
-
-  return {
-    position: positionBuffer,
-  };
-}
-
-//
-// Draw the scene.
-//
-function drawScene(pprogramVar) {
-  const buffers = initBuffers(gl);
-
-  // gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  {
-    const numComponents = 2;
-    const type = gl.FLOAT;
-    const normalize = false;
-    const stride = 0;
-    const offset = 0;
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
-    gl.vertexAttribPointer(
-        pprogramVar,
-        numComponents,
-        type,
-        normalize,
-        stride,
-        offset);
-    gl.enableVertexAttribArray(
-        pprogramVar);
+function redrawFrame() {
+  if (paused) {
+    stepNothing();
   }
-}
-
-//
-// Initialize a shader program, so WebGL knows how to draw our data
-//
-function initShaderProgram(gl, vsSource, fsSource) {
-  const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
-  const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
-
-  // Create the shader program
-
-  const shaderProgram = gl.createProgram();
-  gl.attachShader(shaderProgram, vertexShader);
-  gl.attachShader(shaderProgram, fragmentShader);
-  gl.linkProgram(shaderProgram);
-
-  // If creating the shader program failed, alert
-
-  if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-    alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
-    return null;
-  }
-
-  return shaderProgram;
-}
-
-//
-// creates a shader of the given type, uploads the source and
-// compiles it.
-//
-function loadShader(gl, type, source) {
-  const shader = gl.createShader(type);
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
-    gl.deleteShader(shader);
-    return null;
-  }
-
-  return shader;
+  redraw();
 }
 
 function setupEventHandlers() {
