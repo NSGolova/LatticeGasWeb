@@ -1,14 +1,14 @@
 
 <html>
   <head>
-    <title>Gasomaton</title>
+    <title>Gasomaton (WebGPU)</title>
     <link rel="stylesheet" href="./stylesheets/style.css"/>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"
               integrity="sha512-zhHQR0/H5SEBL3Wn6yYSaTTZej12z0hVZKOv3TwCUXT1z5qeqGcXJLLrbERYRScEDDpYIJhPC1fk31gqR783iQ=="
               crossorigin="anonymous"></script>
     <meta property="og:image" content="https://www.golova.dev/automata/images/preview2.png">
-    <meta property="og:title" content="Gasomaton">
-    <meta property="og:description" content="Interactive lattice gas toy. Turn any image into simulation.">
+    <meta property="og:title" content="GasomatonLite (WebGPU)">
+    <meta property="og:description" content="Interactive lattice gas toy. WebGPU variant.">
     <meta property="og:type" content="website">
     <link rel="apple-touch-icon-precomposed" sizes="57x57" href="images/apple-touch-icon-57x57.png" />
     <link rel="apple-touch-icon-precomposed" sizes="114x114" href="images/apple-touch-icon-114x114.png" />
@@ -23,7 +23,7 @@
     <link rel="icon" type="image/png" href="images/favicon-32x32.png" sizes="32x32" />
     <link rel="icon" type="image/png" href="images/favicon-16x16.png" sizes="16x16" />
     <link rel="icon" type="image/png" href="images/favicon-128.png" sizes="128x128" />
-    <meta name="application-name" content="Gasomaton"/>
+    <meta name="application-name" content="GasomatonLite (WebGPU)"/>
     <meta name="msapplication-TileColor" content="#FFFFFF" />
     <meta name="msapplication-TileImage" content="images/mstile-144x144.png" />
     <meta name="msapplication-square70x70logo" content="images/mstile-70x70.png" />
@@ -31,28 +31,22 @@
     <meta name="msapplication-wide310x150logo" content="images/mstile-310x150.png" />
     <meta name="msapplication-square310x310logo" content="images/mstile-310x310.png" />
 
-    <meta name="twitter:title" content="Gasomaton">
-    <meta name="twitter:description" content="Interactive lattice gas toy. Turn any image into simulation.">
+    <meta name="twitter:title" content="GasomatonLite (WebGPU)">
+    <meta name="twitter:description" content="Interactive lattice gas toy. WebGPU variant.">
     <meta name="twitter:site" content="@nsgolova">
     <meta name="twitter:image" content="https://www.golova.dev/automata/images/preview2.png">
-    <meta name="twitter:image:alt" content="Gasomaton">
+    <meta name="twitter:image:alt" content="GasomatonLite (WebGPU)">
     <meta name="twitter:card" content="summary">
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
   </head>
   <body>
-    <div><label id="logoLabel">Gasomaton</label></div>
+    <div><label id="logoLabel">GasomatonLite (WebGPU)</label></div>
     <div><a id="hideUI">Hide UI</a></div>
     <div id="uiContainer">
     <div id="toolsContainer" onclick="">
       <div id="topUI">
-      <div class="menuTitle">Tool</div>
-      <div id="toolTab"></div>
-      <div class="menuTitle" id="toolOptionsTitle">Shape</div>
-      <div class="tabrow" style="height: 35px;">
-        <div class="tabrow-tab tabrow-tab-opened-accented" id="selectShape0" title="Circle" style="line-height: 35px; display: block; background-image: url('./images/circle.png'); background-size: 28px;"></div>
-        <div class="tabrow-tab" id="selectShape1" title="Square" style="line-height: 35px; display: block; background-image: url('./images/square.png'); background-size: 28px;"></div>
-      </div>
+      
       <div id="toolOptionsContainer"></div>
       <div class="menuTitle">Settings</div>
       <div id="settingsContainer"></div>
@@ -67,27 +61,15 @@
       </div>
     </div>
     <div id="setupContainer" onclick="">
-      <div id="topUI">
-      <div class="menuTitle">Preset</div>
-      <div class="clickable" id="setPreset0" style="visibility: hidden; height: 0px;">SMTH</div>
-      <div class="clickable" id="setPreset1">Random</div>
-      <div class="clickable" id="setPreset2" style="color: red;">Wind tube</div>
-      <div class="clickable" id="setPreset3" style="visibility: hidden; height: 0px;">SMTH</div>
-      <div class="clickable" id="setPreset4">Empty</div>
-      </div>
-      <div style="padding-top: 15px;">
-      <input id="save" type="button" value="Save">
-      <input id="load" type="button" value="Load">
-      </div>
-      <div style="padding-top: 5px;">
-      <input id="recordGif" type="button" value="Record video ">
-      </div>
       <div class="linkContainer">
         <a href="https://youtu.be/" style="disabled: true;">
           <img src="./images/youtube.png" width="32" height="32" title="Video explanation (WIP)">
         </a>
-        <a href="https://github.com/radulov/LatticeGasWeb.git">
+        <a href="https://github.com/radulov/LatticeGasWeb/tree/webGPU">
           <img src="./images/github.png" width="32" height="32" title="Look at my guts">
+        </a>
+        <a href="https://www.golova.dev/automata/latticeGas">
+          <img src="./images/favicon-32x32.png" width="32" height="32" title="Main version (WebGL)">
         </a>
       </div>
     </div>

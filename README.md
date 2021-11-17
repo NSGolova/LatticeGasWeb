@@ -1,10 +1,12 @@
 # Gasomaton
 
-WebGL interactive implementation of lattice gas.
+EXPERIMENTAL! Works only with Chrome Canary at the moment.
+
+WebGPU interactive implementation of lattice gas.
 All calculations are performed on GPU so it can handle huge
 amount of particles.
 
-Deployed [here](https://www.golova.dev/automata/latticeGas)
+Deployed [here](https://www.golova.dev/automata/gasomatonGPU)
 
 ![](images/preview.gif)
 

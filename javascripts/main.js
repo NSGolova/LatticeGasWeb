@@ -23,44 +23,6 @@ const OperationType = {
 };
 var preset = OperationType.initializeWind;
 
-const GasType = {
-  FHPI: 0,
-  FHPII: 1,
-  FHPIII: 2,
-  FHP6: 3
-};
-var type = GasType.FHPIII;
-
-const ToolType = {
-  fan: 0,
-  wall: 1,
-  nothing: 2,
-  applyImage: 3,
-  clear: 128
-};
-// Tool for the left mouse button.
-var tool = ToolType.fan;
-// Tool for the right mouse button.
-var secondaryTool = ToolType.clear;
-
-var toolRadius = 25; // 0.5 of shown
-var toolPosition;
-var imageToolTreshold = 520;
-
-const ToolMode = {
-  main: 0,
-  secondary: 1,
-  none: 128
-};
-var toolInUse = ToolMode.none;
-
-const ToolShape = {
-  circle: 0,
-  square: 1,
-  none: 128
-};
-var shape = ToolShape.circle;
-
 // How fast simulation is calculated.
 var speed = 25;
 var timers = [];
@@ -70,37 +32,17 @@ var paused = false;
 var rulebookController;
 var selectedBook;
 
-var showVelocity = false;
-var velocityScale = 25;
-
-const VelocityColorType = {
-  HSV: 0,
-  Black: 1,
-  Custom: 2
-};
-var velocityColorType = VelocityColorType.HSV;
-var velocityColor = [1.0, 0.0, 0.0, 1.0];
-
-var denoise = false;
-
+// WebGPU stuff
 var entry, adapter, device, context;
+var pipelines, bindgroups, pathDescriptors, textures, programVars;
 
-var pipelines, bindgroups, pathDescriptors;
-var buffers, programs, framebuffers, textures, programVars;
 var curDrag, prevDrag;
 var cameraDest = [0., 0.];
 
 var fps;
 var fpsLabel;
 
-var recording = false;
-var gif;
-
-var toolTabs;
 var speedSlider, resolutionSlider;
-var tresholdSlider, toolSizeSlider;
-var showVelocityToggle, velocitySlider, velocityTabs;
-var denoiseToggle;
 
 main();
 
@@ -114,7 +56,6 @@ async function main() {
   setupDefault();
   start();
 
-  setupButtons();
   setupRulebookUI();
   setupEventHandlers();
 }
@@ -129,9 +70,10 @@ async function setupWebGPU() {
     context = canvas.getContext('webgpu');
   } catch (e) {
     const text = `
-    Unable to initialize WebGPU. Your browser or machine may not support it.
-    Use Google Chrome Canary for the best experience.
-    Check out https://discussions.apple.com/thread/8655829 for Safari.
+    Unable to initialize WebGPU. I'm working only in
+    Google Chrome Canary with 'Unsafe WebGPU' in chrome://flags/
+
+    Or check out the main Gasomaton version.
     `;
     alert(text);
   }
@@ -384,10 +326,6 @@ function recalculateTextures() {
       back: createTexture()
   };
   textures.selected = textures.back;
-
-
-  // recalculateVelocityTexture();
-  // recalculateDenoiseTexture();
 }
 
 function initPipeline(shaderCode, layout, format) {
@@ -461,176 +399,17 @@ function initPipeline(shaderCode, layout, format) {
   });
 }
 
-function createTexture(wrap, filter, size, isFloat) {
-    // var texture = gl.createTexture();
-    // gl.bindTexture(gl.TEXTURE_2D, texture);
-    // wrap = wrap == null ? gl.CLAMP_TO_EDGE : wrap;
-    // filter = filter == null ? gl.LINEAR : filter;
-    // gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
-    // gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
-    // gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-    // gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
-    //
-    // gl.bindTexture(gl.TEXTURE_2D, texture);
-    //
-    // if (isFloat) {
-    //   if (size) {
-    //     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, size[0], size[1],
-    //                       0, gl.RGBA, gl.HALF_FLOAT, null);
-    //   } else {
-    //     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, statesize[0], statesize[1],
-    //                       0, gl.RGBA, gl.HALF_FLOAT, null);
-    //   }
-    // } else {
-    //   if (size) {
-    //     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, size[0], size[1],
-    //                       0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, null);
-    //   } else {
-    //     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, statesize[0], statesize[1],
-    //                       0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, null);
-    //   }
-    // }
+function createTexture(size) {
 
     return device.createTexture({
       size: size ? [size[0], size[1], 1] : [statesize[0], statesize[1], 1],
       mipLevelCount: 1,
       format: 'rgba8uint',
-      usage:
-        GPUTextureUsage.TEXTURE_BINDING |
-        GPUTextureUsage.STORAGE_BINDING |
-        GPUTextureUsage.COPY_DST |
-        GPUTextureUsage.RENDER_ATTACHMENT,
+      usage: 4 | //GPUTextureUsage.TEXTURE_BINDING
+        8 | //GPUTextureUsage.STORAGE_BINDING
+        2 | //GPUTextureUsage.COPY_DST
+        16, //GPUTextureUsage.RENDER_ATTACHMENT
     });
-
-    // return texture;
-}
-
-function createArray(data) {
-    var buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-    return buffer;
-}
-
-function createImageFromTexture(texture, width, height) {
-    // Create a framebuffer backed by the texture
-    var framebuffer = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-
-    // Read the contents of the framebuffer
-    var data = new Uint8Array(width * height * 4);
-    gl.readPixels(0, 0, width, height, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, data);
-    for (var i = 0; i < data.length; i++) {
-      if (data[i] != 0 && data[i] != 128) {
-        data[i] -= 1;
-      }
-    }
-
-    gl.deleteFramebuffer(framebuffer);
-
-    var canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-
-    var context = canvas.getContext('2d');
-    var imageData = context.createImageData(width, height);
-    imageData.data.set(data);
-    context.putImageData(imageData, 0, 0);
-
-    return canvas.toDataURL("image/png").replace(/^data:image\/[^;]/, 'data:application/octet-stream');
-}
-
-function saveBase64AsFile(base64, fileName) {
-    var link = document.createElement("a");
-
-    document.body.appendChild(link); // for Firefox
-
-    link.setAttribute("href", base64);
-    link.setAttribute("download", fileName);
-    link.click();
-}
-
-function save() {
-  saveBase64AsFile(createImageFromTexture(textures.front, statesize[0], statesize[1]), "gasomaton.png");
-}
-
-function rgbaDataWithImage(image) {
-  var canvas = document.createElement("canvas");
-  canvas.width = image.width;
-  canvas.height = image.height;
-
-  var context = canvas.getContext('2d');
-  context.drawImage(image, 0, 0);
-
-  return context.getImageData(0, 0, image.width, image.height).data;
-}
-
-function createTextureFromImage(image) {
-  statesize = [image.width, image.height];
-  textures = {
-      front: createTexture(gl.REPEAT, gl.NEAREST),
-      back: createTexture(gl.REPEAT, gl.NEAREST)
-  };
-
-  recalculateVelocityTexture();
-
-  const uiData = rgbaDataWithImage(image);
-  var imgData = new Uint8Array(uiData);
-  for (var i = 0; i < imgData.length; i++) {
-    if (imgData[i] != 0 && imgData[i] != 128) {
-      imgData[i] += 1;
-    }
-  }
-
-  gl.bindTexture(gl.TEXTURE_2D, textures.front);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, statesize[0], statesize[1],
-                      0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, imgData);
-}
-
-function load() {
-  loadFile(createTextureFromImage);
-}
-
-function loadImageToApply() {
-  loadFile(function (image) {
-
-    const uiData = rgbaDataWithImage(image);
-
-    const texture = createTexture(gl.REPEAT, gl.NEAREST, [image.width, image.height]);
-    textures.apply = texture;
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, image.width, image.height,
-                        0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, uiData);
-  })
-}
-
-function loadFile(completion) {
-  var input = document.createElement('input');
-  input.type = 'file';
-
-  input.onchange = e => {
-
-     // getting a hold of the file reference
-     var file = e.target.files[0];
-
-     // setting up the reader
-     var reader = new FileReader();
-     reader.readAsDataURL(file);
-
-     // here we tell the reader what to do when it's done reading...
-     reader.onload = readerEvent => {
-        var content = readerEvent.target.result;
-        const img = new Image();
-        img.onload = function() {
-          completion(img);
-        }
-        img.src = content;
-     }
-
-  }
-
-  input.click();
 }
 
 function swap() {
@@ -657,16 +436,8 @@ function stepResize(oldSize) {
   stepProgram(OperationType.resize, oldSize);
 }
 
-function stepRandom() {
-  stepProgram(OperationType.initializeRandom);
-}
-
 function stepWind() {
   stepProgram(OperationType.initializeWind);
-}
-
-function stepClear() {
-  stepProgram(OperationType.clear);
 }
 
 function stepNothing() {
@@ -703,13 +474,6 @@ function stepProgram(operation, oldSize) {
   
 
   const commandEncoder = device.createCommandEncoder();
-  // {
-  //   const passEncoder = commandEncoder.beginComputePass();
-  //   passEncoder.setPipeline(computePipeline);
-  //   passEncoder.setBindGroup(0, computeBindGroup);
-  //   passEncoder.dispatch(Math.ceil(numParticles / 64));
-  //   passEncoder.endPass();
-  // }
   {
     const passEncoder = commandEncoder.beginRenderPass(pathDescriptors.col);
 
@@ -722,26 +486,6 @@ function stepProgram(operation, oldSize) {
   }
 
   device.queue.submit([commandEncoder.finish()]);
-
-  // gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.step);
-  // gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
-  //                         gl.TEXTURE_2D, textures.back, 0);
-
-  // gl.activeTexture(gl.TEXTURE0);
-  // gl.bindTexture(gl.TEXTURE_2D, textures.front);
-
-  // gl.viewport(0, 0, statesize[0], statesize[1]);
-
-  // gl.useProgram(program);
-
-  // drawScene(vars.quad);
-
-  // gl.uniform1i(vars.state, 0);
-  // gl.uniform1i(vars.operation, operation);
-  // gl.uniform2f(vars.scale, statesize[0], statesize[1]);
-  // gl.uniform1uiv(vars.colissionMap, colissionMap());
-
-  // gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
   swap();
 }
@@ -789,33 +533,6 @@ function redraw() {
     }
 
     device.queue.submit([commandEncoder.finish()]);
-
-
-  // const program = programs.copy;
-  //
-  // gl.activeTexture(gl.TEXTURE2);
-  // gl.bindTexture(gl.TEXTURE_2D, textures.front);
-  //
-  // gl.activeTexture(gl.TEXTURE3);
-  // gl.bindTexture(gl.TEXTURE_2D, textures.velocityMap);
-  //
-  // gl.viewport(0, 0, viewsize[0], viewsize[1]);
-  //
-  // gl.useProgram(program);
-  //
-  // gl.uniform1i(programVars.copy.state, 2);
-  // gl.uniform1i(programVars.copy.velocityMap, 3);
-  //
-  // gl.uniform2f(programVars.copy.camera, camera[0], camera[1]);
-  // gl.uniform1f(programVars.copy.zoom, zoom);
-  // gl.uniform1i(programVars.copy.showVelocity, showVelocity ? 1 : 0);
-  //
-  // drawScene(programVars.copy.quad);
-  // gl.uniform2f(programVars.copy.scale, viewsize[0], viewsize[1]);
-  // gl.uniform2f(programVars.copy.size, statesize[0], statesize[1]);
-  // gl.uniform2f(programVars.copy.resolution, resolution[0], resolution[1]);
-  //
-  // gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
   fpsLabel.innerHTML = "fps: " + fps;
 }
@@ -955,8 +672,6 @@ function setupEventHandlers() {
     // Move the camera.
     camera[0] = gestureStartCamera[0] + xDist;
     camera[1] = gestureStartCamera[1] + yDist;
-
-    redraw();
   });
 
   function onTouchEnd(e) {
@@ -983,37 +698,24 @@ function setupEventHandlers() {
         pause();
       }
     }
-    if (isFinite(event.key) && event.key != ' ' && event.target == document.body) {
-      var index = parseInt(event.key) - 1;
-      selectTool(index);
-      toolTabs.selected = index;
-    }
   })
 
   canvas.addEventListener("wheel", e => {
     e.preventDefault();
 
     const zoomAmount = -Math.sign(e.deltaY);
+    const cameraFp = ScreenToPt(e.pageX, e.pageY);
 
-    if (e.shiftKey) {
-      toolRadius += zoomAmount * (toolRadius / 20.0);
-      toolSizeSlider.setValue(toolRadius * 2);
-    } else {
-      const cameraFp = ScreenToPt(e.pageX, e.pageY);
+    zoom += zoomAmount * (zoom / 20.0);
+    const cameraFpNew = ScreenToPt(e.pageX, e.pageY);
+    const fpXDelta = cameraFpNew[0] - cameraFp[0];
+    const fpYDelta = cameraFpNew[1] - cameraFp[1];
 
-      zoom += zoomAmount * (zoom / 20.0);
-      const cameraFpNew = ScreenToPt(e.pageX, e.pageY);
-      const fpXDelta = cameraFpNew[0] - cameraFp[0];
-      const fpYDelta = cameraFpNew[1] - cameraFp[1];
+    cameraDest[0] += fpXDelta;
+    cameraDest[1] += fpYDelta;
 
-      cameraDest[0] += fpXDelta;
-      cameraDest[1] += fpYDelta;
-
-      camera[0] = (camera[0] + fpXDelta) * 0.8 + cameraDest[0] * 0.2;
-      camera[1] = (camera[1] + fpYDelta) * 0.8 + cameraDest[1] * 0.2;
-    }
-
-    redraw();
+    camera[0] = (camera[0] + fpXDelta) * 0.8 + cameraDest[0] * 0.2;
+    camera[1] = (camera[1] + fpYDelta) * 0.8 + cameraDest[1] * 0.2;
   }, { passive: false });
 
   // Disable context menu for right click.
@@ -1033,34 +735,11 @@ function setupEventHandlers() {
     }
     prevDrag = [e.offsetX, e.offsetY];
       dragging = (e.button == 1 || (e.altKey && e.button == 0));
-      if (e.button == 2) {
-        rightPressed = true;
-
-        toolInUse = ToolMode.secondary;
-        if (paused) {
-          stepNothing();
-          redraw();
-        }
-      }
-      if (!dragging && e.button == 0) {
-        leftPressed = true;
-
-        toolInUse = ToolMode.main;
-        if (paused) {
-          stepNothing();
-          redraw();
-        }
-      }
   });
 
   canvas.addEventListener('pointermove', e => {
     if (gesturing) {
       return;
-    }
-    toolPosition = ScreenToState(e.offsetX, e.offsetY);
-    if (paused) {
-      stepNothing();
-      redraw();
     }
     curDrag = [e.offsetX, e.offsetY];
     if (dragging) {
@@ -1074,36 +753,10 @@ function setupEventHandlers() {
     rightPressed = false;
     curDrag = null;
     prevDrag = null;
-    toolInUse = ToolMode.none;
   });
 
   window.addEventListener('resize', function() {
     resizeView();
-  });
-
-  var saveButton = document.querySelector('#save');
-  saveButton.addEventListener('pointerdown', function() {
-    save();
-  });
-
-  var loadButton = document.querySelector('#load');
-  loadButton.addEventListener('pointerdown', function() {
-    load();
-  });
-
-  var recordButton = document.querySelector('#recordGif');
-  recordButton.addEventListener('pointerdown', function() {
-    if (recording) {
-      recordButton.value = "Record video ";
-      recordButton.style.backgroundColor = "";
-      recordButton.style.color = "";
-      stopRecordingGif();
-    } else {
-      recordButton.value = "Stop recording";
-      recordButton.style.backgroundColor = "red";
-      recordButton.style.color = "white";
-      recordGif();
-    }
   });
 
   var uiContainer = document.querySelector('#uiContainer');
@@ -1144,168 +797,6 @@ function setupSliders() {
       gridSize = slider.value;
       resize();
     }, "prtc");
-
-    showVelocityToggle = new ToggleInput(
-      "settingsContainer",
-      "Show velocity",
-      "Show velocity arrows grid. Decreases performance!",
-      showVelocity,
-    function(toggle) {
-      showVelocity = toggle.checked;
-      velocitySlider.hidden = !showVelocity;
-      velocityTabs.hidden = !showVelocity;
-      recalculateVelocityTexture();
-      redraw();
-    });
-
-  velocitySlider = new SliderInput(
-    "settingsContainer",
-    "Arrow length",
-    "Simulation grid size multiplicator.", 1, velocityScale, 1000,
-    function (slider) {
-      velocityScale = slider.value;
-      recalculateVelocityTexture();
-      redraw();
-    }, null, !showVelocity);
-
-  velocityTabs = new TabInputs("settingsContainer", "arrowColor", [
-       {title: "HSV from arrow direcrtion.", image: "hsv-hex", selected: true},
-       {title: "Black", image: "black-circle"},
-       {title: "I will select myself"}], function (index) {
-         velocityColorType = index;
-       }, !showVelocity);
-
-  var colorPicker = document.createElement('input');
-  colorPicker.type = "color";
-  colorPicker.value = "#CC0000";
-  colorPicker.style.height = "35px";
-  colorPicker.addEventListener('input', function () {
-    velocityColor = this.value.hexToRgb();
-  });
-
-
-  velocityTabs.elements[2].append(colorPicker);
-
-  denoiseToggle = new ToggleInput(
-    "postSettingsContainer",
-    "Denoise",
-    "Enable denoise postprocessing. Decreases performance!",
-    denoise,
-  function(toggle) {
-    denoise = toggle.checked;
-    recalculateDenoiseTexture();
-    redraw();
-  });
-
-  toolSizeSlider = new SliderInput(
-    "toolOptionsContainer",
-    "Brush size",
-    "Or Shift+Wheel", 1, toolRadius * 2, 1000,
-    function (slider) {
-      toolRadius = slider.value / 2;
-      if (paused) {
-        stepNothing();
-        redraw();
-      }
-    }, "X");
-
-  tresholdSlider = new SliderInput(
-    "toolOptionsContainer",
-    "Treshold",
-    "How dark pixels should be for a wall.", 1, imageToolTreshold, 1000,
-    function (slider) {
-      imageToolTreshold = slider.value;
-      if (paused) {
-        stepNothing();
-        redraw();
-      }
-    }, null, true);
-}
-
-// TOFO: Move to classes.
-var g_setPresetElements;
-var g_selectShapeElements;
-function setPreset(elem, id) {
-  for (var i = 0; i < g_setPresetElements.length; ++i) {
-    g_setPresetElements[i].style.color = i == id ? "red" : "gray"
-  }
-  preset = id;
-  updatePreset();
-}
-function selectTool(toolID) {
-
-  tool = toolID == 2 ? 128 : toolID;
-
-  var optionsTitle = document.querySelector('#toolOptionsTitle');
-  var option0 = document.querySelector('#selectShape0');
-  var option1 = document.querySelector('#selectShape1');
-  if (tool == ToolType.applyImage && !textures.apply) {
-    loadImageToApply();
-    optionsTitle.innerHTML = "How to apply"
-    option0.style.backgroundImage = "url('./images/normal-image.png')"
-    option0.title = "Normal image";
-
-    option1.style.backgroundImage = "url('./images/negative-image.png')"
-    option1.style.backgroundColor = "black"
-    option1.title = "Negative image";
-
-    tresholdSlider.show()
-
-  } else {
-    textures.apply = null;
-    optionsTitle.innerHTML = "Shape"
-    option0.style.backgroundImage = "url('./images/circle.png')"
-    option0.title = "Circle";
-
-    option1.style.backgroundImage = "url('./images/square.png')"
-    option1.style.backgroundColor = ""
-    option0.title = "Square";
-
-    tresholdSlider.hide()
-  }
-}
-function selectShape(elem, id) {
-  for (var i = 0; i < g_selectShapeElements.length; ++i) {
-    g_selectShapeElements[i].className = i == id ? "tabrow-tab tabrow-tab-opened-accented" : "tabrow-tab"
-  }
-  shape = id;
-  if (paused) {
-    stepNothing();
-    redraw();
-  }
-}
-
-function setupButtons() {
- toolTabs = new TabInputs("toolTab", "tool", [
-    {title: "Particle generator (1)", image: "fan", selected: true},
-    {title: "Inpenetratable wall (2)", image: "wall"},
-    {title: "Clear (right-click or 3)", image: "erase"},
-    {title: "Apply image (4)", image: "apply-image"}], selectTool);
-
-  g_selectShapeElements = [];
-  for (var ii = 0; ii < 100; ++ii) {
-    var elem = document.getElementById("selectShape" + ii);
-    if (!elem) {
-      break;
-    }
-    g_selectShapeElements.push(elem);
-    elem.onclick = function(elem, id) {
-      return function () {
-        selectShape(elem, id);
-      }}(elem, ii);
-  }
-  g_setPresetElements = [];
-  for (var ii = 0; ii < 100; ++ii) {
-    var elem = document.getElementById("setPreset" + ii);
-    if (!elem) {
-      break;
-    }
-    g_setPresetElements.push(elem);
-    elem.onclick = function(elem, id) {
-      return function () {
-        setPreset(elem, id);
-      }}(elem, ii);
-  }
 }
 
 function setupFps() {
@@ -1374,20 +865,4 @@ function applyDrag() {
   prevDrag = curDrag;
 
   redraw();
-}
-
-function recordGif() {
-  recording = true;
-
-  const canvas = document.querySelector('#glcanvas');
-  gif = new CanvasRecorder(canvas);
-  gif.start();
-}
-
-function stopRecordingGif() {
-  recording = false;
-
-  gif.stop();
-  gif.save('Gasomaton.webm');
-  gif = null;
 }

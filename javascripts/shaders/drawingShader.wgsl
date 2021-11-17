@@ -67,16 +67,16 @@ fn colorAt(pos: vec2<i32>, state: texture_2d<u32>) -> vec4<f32> {
   } else {
     let prtcl: u32 = data.x;
 
-    switch (prtcl) {
-      case 0u: {
+    switch (i32(prtcl)) {
+      case 0: {
         angleColor = vec4<f32>(0.0, 0.0, 0.0, 1.0);
         break;
       }
-      case 128u: {
+      case 128: {
         angleColor = vec4<f32>(0.9, 0.9, 0.9, 1.0);
         break;
       }
-      case 64u: {
+      case 64: {
         angleColor = vec4<f32>(0.6, 0.6, 0.6, 1.0);
         break;
       }
